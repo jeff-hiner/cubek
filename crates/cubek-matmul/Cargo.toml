@@ -12,7 +12,6 @@ version.workspace = true
 
 [features]
 default = ["std", "cubecl/default"]
-export_tests = ["pretty_assertions"]
 std = ["cubecl/std"]
 
 matmul_tests_mma = []
@@ -85,8 +84,9 @@ bytemuck = { workspace = true }
 cubecl = { workspace = true }
 cubecl-common = { workspace = true }
 half = { workspace = true, features = ["bytemuck"] }
-pretty_assertions = { workspace = true, optional = true }
 serde = { workspace = true }
 
 [dev-dependencies]
 trybuild = "1"
+pretty_assertions = { workspace = true }
+cubecl = { workspace = true, features = ["test-runtime"] }

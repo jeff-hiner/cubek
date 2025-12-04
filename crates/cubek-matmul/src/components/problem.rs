@@ -43,13 +43,12 @@ impl MatmulProblem {
     }
 
     /// Returns the total number of batches of the output
-    pub(crate) fn num_batches(&self) -> usize {
+    pub fn num_batches(&self) -> usize {
         self.output_batch_dims().iter().product()
     }
 
     /// Returns the shape of the identified tensor, inferred by the problem definition
-    #[allow(unused)]
-    pub(crate) fn shape(&self, ident: MatmulIdent) -> Vec<usize> {
+    pub fn shape(&self, ident: MatmulIdent) -> Vec<usize> {
         match ident {
             MatmulIdent::Lhs => self
                 .lhs_batches
