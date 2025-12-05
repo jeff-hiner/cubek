@@ -1,14 +1,14 @@
 use tracel_xtask::prelude::*;
 
 #[macros::extend_command_args(TestCmdArgs, Target, TestSubCommand)]
-pub struct CubeCLTestCmdArgs {
+pub struct CubeKTestCmdArgs {
     /// Build in CI mode which excludes unsupported crates.
     #[arg(long)]
     pub ci: bool,
 }
 
 pub(crate) fn handle_command(
-    args: CubeCLTestCmdArgs,
+    args: CubeKTestCmdArgs,
     _env: Environment,
     _context: Context,
 ) -> anyhow::Result<()> {

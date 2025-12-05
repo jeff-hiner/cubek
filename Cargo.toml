@@ -14,12 +14,13 @@ rust-version = "1.88"
 version = "0.0.1"
 
 [workspace.dependencies]
-# For local dev
-# cubecl = { path = "../cubecl/crates/cubecl", version = "0.9.0-pre.4" }
-# cubecl-common = { path = "../cubecl/crates/cubecl-common", version = "0.9.0-pre.4" }
+### For local development. ###
+# cubecl = { path = "../cubecl/crates/cubecl", default-features = false }
+# cubecl-common = { path = "../cubecl/crates/cubecl-common", default-features = false }
 
-cubecl = { git = "https://github.com/tracel-ai/cubecl", rev = "e7515bb10bbc16f1fff6c32803938a1da95affed" }
-cubecl-common = { git = "https://github.com/tracel-ai/cubecl", rev = "e7515bb10bbc16f1fff6c32803938a1da95affed" }
+### For the main cubek branch. ###
+cubecl = { git = "https://github.com/tracel-ai/cubecl", rev = "e7515bb10bbc16f1fff6c32803938a1da95affed", default-features = false }
+cubecl-common = { git = "https://github.com/tracel-ai/cubecl", rev = "e7515bb10bbc16f1fff6c32803938a1da95affed", default-features = false }
 
 bitflags = { version = "2.9.1", features = ["serde"] }
 derive-new = { version = "0.7.0", default-features = false }

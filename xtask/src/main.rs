@@ -20,7 +20,7 @@ pub enum Command {
     /// Build cubecl in different modes.
     Check(CheckCmdArgs),
     /// Test cubecl.
-    Test(commands::test::CubeCLTestCmdArgs),
+    Test(commands::test::CubeKTestCmdArgs),
     /// Profile kernels.
     Profile(commands::profile::ProfileArgs),
 }
