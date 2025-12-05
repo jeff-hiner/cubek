@@ -6,8 +6,4 @@ mod base;
 pub mod components;
 /// Contains attention kernels
 pub mod kernels;
-/// Tests for attention kernels
-#[cfg(feature = "export_tests")]
-pub mod tests;
-
 pub use base::*;
