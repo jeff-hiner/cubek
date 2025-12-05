@@ -1,6 +1,9 @@
-use cubecl::ir::{ElemType, FloatKind, StorageType};
-
-use crate::components::{AttentionIdent, AttentionLineSizes};
+use crate::components::{AttentionIdent, AttentionLineSizes, AvailableLineSizes};
+use cubecl::{
+    Runtime,
+    client::ComputeClient,
+    ir::{ElemType, FloatKind, StorageType},
+};
 
 #[derive(Clone, Debug)]
 /// Description of an attention problem to solve, regardless of actual data
@@ -30,7 +33,62 @@ pub struct AttentionProblem {
     pub accumulator_precision: AccumulatorPrecision,
 }
 
+#[derive(Clone, Debug)]
+/// Description of an attention problem to solve, regardless of actual data
+pub struct AttentionProblemDims {
+    /// Batch size
+    pub batch: usize,
+    /// Number of attention heads
+    pub num_heads: usize,
+
+    /// Query sequence length
+    pub seq_q: usize,
+    /// Key/Value sequence length
+    pub seq_kv: usize,
+    /// Dimension of each head (d)
+    pub head_dim: usize,
+    /// Dimension of each value vector.  
+    /// Usually equal to `head_dim`, but may differ in some variants
+    pub val_dim: usize,
+}
+
 impl AttentionProblem {
+    pub fn new<R: Runtime>(
+        client: &ComputeClient<R>,
+        dims: AttentionProblemDims,
+        masked: bool,
+        causal: bool,
+        global_dtypes: AttentionStorageTypes,
+        accumulator_precision: AccumulatorPrecision,
+    ) -> Self {
+        let line_sizes = AvailableLineSizes::from_global_types::<R>(client, global_dtypes.clone())
+            .filter(
+                |ls| dims.head_dim % *ls as usize == 0,
+                AttentionIdent::Query,
+            )
+            .filter(|ls| dims.head_dim % *ls as usize == 0, AttentionIdent::Key)
+            .filter(|ls| dims.val_dim % *ls as usize == 0, AttentionIdent::Value)
+            // Lined mask not always supported
+            .filter(|ls| *ls == 1, AttentionIdent::Mask)
+            .filter(|ls| dims.val_dim % *ls as usize == 0, AttentionIdent::Out)
+            .pick_max()
+            .unwrap();
+
+        Self {
+            batch: dims.batch,
+            num_heads: dims.num_heads,
+            seq_q: dims.seq_q,
+            seq_kv: dims.seq_kv,
+            head_dim: dims.head_dim,
+            val_dim: dims.val_dim,
+            masked,
+            causal,
+            line_sizes,
+            global_dtypes,
+            accumulator_precision,
+        }
+    }
+
     pub fn shape(&self, ident: AttentionIdent) -> [usize; 4] {
         match ident {
             AttentionIdent::Query => [self.batch, self.num_heads, self.seq_q, self.head_dim],

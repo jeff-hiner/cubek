@@ -1,0 +1,46 @@
+[package]
+authors = [
+    "nathanielsimard <nathaniel.simard.42@gmail.com>",
+    "louisfd <louisfd94@gmail.com>",
+]
+categories = ["science", "mathematics", "algorithms"]
+description = "CubeK: Benchmarks"
+edition.workspace = true
+keywords = []
+license.workspace = true
+name = "benchmarks"
+readme.workspace = true
+repository = "https://github.com/tracel-ai/cubek"
+version.workspace = true
+
+[features]
+
+[dependencies]
+cubek = { path = "../crates/cubek", version = "0.0.1", default-features = false, features = [
+    "random",
+    "matmul",
+    "convolution",
+    "attention",
+] }
+cubecl = { workspace = true, features = ["test-runtime", "stdlib"] }
+half = { workspace = true }
+
+[[bench]]
+harness = false
+name = "matmul"
+
+[[bench]]
+harness = false
+name = "conv2d"
+
+[[bench]]
+harness = false
+name = "memcpy_async"
+
+[[bench]]
+harness = false
+name = "unary"
+
+[[bench]]
+harness = false
+name = "attention"

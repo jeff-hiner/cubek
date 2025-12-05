@@ -13,9 +13,9 @@ pub(crate) fn handle_command(
     _context: Context,
 ) -> anyhow::Result<()> {
     let backends: &[&str] = if args.ci {
-        &["cubecl/wgpu", "cubecl/cpu"]
+        &["cubecl/cpu"]
     } else {
-        &["cubecl/wgpu"]
+        &["cubecl/wgpu", "cubecl/cpu"]
     };
     for backend in backends {
         helpers::custom_crates_tests(

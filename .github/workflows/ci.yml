@@ -25,16 +25,16 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_PREVIOUS_VERSION: 1.88.0
+  RUST_PREVIOUS_VERSION: 1.89.0
 
   # Sourced from https://vulkan.lunarg.com/sdk/home#linux
   VULKAN_SDK_VERSION: "1.3.268"
 
   # Sourced from https://archive.mesa3d.org/. Bumping this requires
   # updating the mesa build in https://github.com/gfx-rs/ci-build and creating a new release.
-  MESA_VERSION: "23.3.1"
+  MESA_VERSION: "24.2.3"
   # Corresponds to https://github.com/gfx-rs/ci-build/releases
-  MESA_CI_BINARY_BUILD: "build18"
+  MESA_CI_BINARY_BUILD: "build19"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,7 +42,7 @@ concurrency:
 
 jobs:
   prepare-checks:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       rust-prev-version: ${{ env.RUST_PREVIOUS_VERSION }}
     steps:
@@ -51,7 +51,7 @@ jobs:
         run: echo
 
   code-quality:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: prepare-checks
     strategy:
       matrix:
@@ -81,7 +81,7 @@ jobs:
         uses: tracel-ai/github-actions/check-typos@v5
 
   documentation:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: prepare-checks
     strategy:
       matrix:
@@ -103,16 +103,7 @@ jobs:
         run: cargo xtask doc tests
 
   linux-std-tests:
-    runs-on: [
-      '@id:cubek-linux-std-tests-${{ matrix.rust }}-${{ github.run_id }}-${{ github.run_attempt }}',
-      '@image-family:ubuntu-2404-lts-amd64',
-      '@image-project:ubuntu-os-cloud',
-      '@disk-size:100',
-      '@keep-alive:false',
-      '@machine-type:n2-standard-16',
-      '@os:linux',
-      '@zones:northamerica-northeast1-b'
-      ]
+    runs-on: ubuntu-24.04
     needs: [prepare-checks, code-quality]
     strategy:
       matrix:

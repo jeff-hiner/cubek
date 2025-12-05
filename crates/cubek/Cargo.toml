@@ -47,3 +47,4 @@ cubek-reduce = { path = "../cubek-reduce", version = "0.0.1", default-features =
 cubek-matmul = { path = "../cubek-matmul", version = "0.0.1", default-features = false, optional = true }
 cubek-convolution = { path = "../cubek-convolution", version = "0.0.1", default-features = false, optional = true }
 cubek-attention = { path = "../cubek-attention", version = "0.0.1", default-features = false, optional = true }
+cubecl = { workspace = true }

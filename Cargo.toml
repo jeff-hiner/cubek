@@ -4,7 +4,7 @@
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
 resolver = "2"
 
-members = ["crates/*", "xtask"]
+members = ["crates/*", "xtask", "benchmarks"]
 
 [workspace.package]
 edition = "2024"
@@ -19,12 +19,12 @@ version = "0.0.1"
 # cubecl-common = { path = "../cubecl/crates/cubecl-common", default-features = false }
 
 ### For the main cubek branch. ###
-# cubecl = { git = "https://github.com/tracel-ai/cubecl", rev = "e7515bb10bbc16f1fff6c32803938a1da95affed", default-features = false }
-# cubecl-common = { git = "https://github.com/tracel-ai/cubecl", rev = "e7515bb10bbc16f1fff6c32803938a1da95affed", default-features = false }
+cubecl = { git = "https://github.com/tracel-ai/cubecl", rev = "e7515bb10bbc16f1fff6c32803938a1da95affed", default-features = false }
+cubecl-common = { git = "https://github.com/tracel-ai/cubecl", rev = "e7515bb10bbc16f1fff6c32803938a1da95affed", default-features = false }
 
 ### For releases ###
-cubecl = { version = "=0.9.0-pre.5", default-features = false }
-cubecl-common = { version = "=0.9.0-pre.5", default-features = false }
+# cubecl = { version = "=0.9.0-pre.5", default-features = false }
+# cubecl-common = { version = "=0.9.0-pre.5", default-features = false }
 
 bitflags = { version = "2.9.1", features = ["serde"] }
 derive-new = { version = "0.7.0", default-features = false }
