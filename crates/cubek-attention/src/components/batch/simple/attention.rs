@@ -1,4 +1,4 @@
-use cubecl as cubecl;
+use cubecl;
 use cubecl::prelude::*;
 use cubecl::std::{CubeOption, tensor::r#virtual::VirtualTensor};
 use std::marker::PhantomData;

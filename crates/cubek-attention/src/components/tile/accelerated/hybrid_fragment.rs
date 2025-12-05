@@ -1,4 +1,4 @@
-use cubecl as cubecl;
+use cubecl;
 use cubecl::prelude::*;
 use cubek_matmul::components::TileSize;
 

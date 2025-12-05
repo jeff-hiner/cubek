@@ -1,4 +1,5 @@
 use cubecl::prelude::*;
+use cubecl::std::tensor::{View, layout::Coords2d};
 use cubecl::{self as cubecl};
 use cubek_matmul::components::{
     StageIdent,
@@ -8,7 +9,6 @@ use cubek_matmul::components::{
         unit_write,
     },
 };
-use cubecl::std::tensor::{View, layout::Coords2d};
 
 use crate::components::{
     global::simple::{AttentionWriter, AttentionWriterExpand},

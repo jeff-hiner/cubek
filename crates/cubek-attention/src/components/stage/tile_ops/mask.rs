@@ -1,4 +1,4 @@
-use cubecl as cubecl;
+use cubecl;
 use cubecl::prelude::*;
 use cubecl::std::tensor::layout::Coords2d;
 use cubecl::std::{CubeOption, CubeOptionExpand};

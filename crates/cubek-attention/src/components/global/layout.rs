@@ -1,10 +1,10 @@
 use cubecl::prelude::*;
-use cubecl::{self as cubecl};
-use cubek_matmul::components::global::memory::GlobalMemoryConfig;
 use cubecl::std::tensor::{
     layout::{Coords1d, Coords2d, Layout, LayoutExpand},
     r#virtual::VirtualTensor,
 };
+use cubecl::{self as cubecl};
+use cubek_matmul::components::global::memory::GlobalMemoryConfig;
 
 /// Global layout that uses the last two dimensions and ignores all others.
 #[derive(CubeType, Clone, Copy)]

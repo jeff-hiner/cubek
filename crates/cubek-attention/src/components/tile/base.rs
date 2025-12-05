@@ -1,4 +1,4 @@
-use cubecl as cubecl;
+use cubecl;
 use cubecl::prelude::*;
 use cubek_matmul::components::ComputeResources;
 use cubek_matmul::components::tile::StridedTile;

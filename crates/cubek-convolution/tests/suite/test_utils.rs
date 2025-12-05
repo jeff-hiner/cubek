@@ -1,15 +1,15 @@
-use std::fmt::Display;
-
+use cubecl::features::MmaConfig;
+use cubecl::prelude::CubePrimitive;
+use cubecl::std::tensor::TensorHandle;
 use cubecl::{
     CubeElement, Runtime,
     client::ComputeClient,
+    prelude::*,
     prelude::{Float, Numeric},
     server::{self},
 };
-use cubek_matmul::tests::test_utils::{CastInto, Sample};
-use cubecl_runtime::MmaConfig;
-
-use crate::components::ConvolutionProblem;
+use cubek_convolution::components::ConvolutionProblem;
+use std::fmt::Display;
 
 pub trait TestPrecision {
     type EG: Numeric + CubeElement + Display + CastInto<Self::ES> + Sample;
@@ -25,6 +25,16 @@ pub trait TestPrecision {
         shape: &[usize],
         strides: &[usize],
     );
+}
+
+#[derive(Debug)]
+pub struct TensorRawParts<N: Numeric + CubeElement> {
+    pub handle: server::Handle,
+    #[allow(unused)] //TODO: Fix
+    pub scale: Option<server::Handle>,
+    pub shape: Vec<usize>,
+    pub strides: Vec<usize>,
+    pub original_data: Option<Vec<N>>,
 }
 
 impl<EG, ES> TestPrecision for (EG, ES)
@@ -213,4 +223,180 @@ where
     }
 
     out
+}
+
+pub trait CastInto<E> {
+    fn cast_into(self) -> E;
+}
+
+impl<E> CastInto<E> for E {
+    fn cast_into(self) -> E {
+        self
+    }
+}
+
+impl CastInto<f32> for half::f16 {
+    fn cast_into(self) -> f32 {
+        f32::from(self)
+    }
+}
+
+impl CastInto<f32> for half::bf16 {
+    fn cast_into(self) -> f32 {
+        f32::from(self)
+    }
+}
+
+impl CastInto<f32> for flex32 {
+    fn cast_into(self) -> f32 {
+        f32::from(self)
+    }
+}
+
+impl CastInto<half::bf16> for f32 {
+    fn cast_into(self) -> half::bf16 {
+        half::bf16::from_f32(self)
+    }
+}
+
+impl CastInto<half::bf16> for half::f16 {
+    fn cast_into(self) -> half::bf16 {
+        half::bf16::from_f32(self.to_f32())
+    }
+}
+
+impl CastInto<half::f16> for half::bf16 {
+    fn cast_into(self) -> half::f16 {
+        half::f16::from_f32(self.to_f32())
+    }
+}
+
+impl CastInto<half::f16> for f32 {
+    fn cast_into(self) -> half::f16 {
+        half::f16::from_f32(self)
+    }
+}
+
+impl CastInto<half::f16> for flex32 {
+    fn cast_into(self) -> half::f16 {
+        half::f16::from_f32(self.to_f32())
+    }
+}
+
+impl CastInto<half::bf16> for flex32 {
+    fn cast_into(self) -> half::bf16 {
+        half::bf16::from_f32(self.to_f32())
+    }
+}
+
+impl CastInto<flex32> for f32 {
+    fn cast_into(self) -> flex32 {
+        flex32::from_f32(self)
+    }
+}
+
+impl CastInto<f32> for tf32 {
+    fn cast_into(self) -> f32 {
+        self.to_f32()
+    }
+}
+
+impl CastInto<tf32> for f32 {
+    fn cast_into(self) -> tf32 {
+        tf32::from_f32(self)
+    }
+}
+
+impl CastInto<u16> for u8 {
+    fn cast_into(self) -> u16 {
+        self as u16
+    }
+}
+
+impl CastInto<i32> for u16 {
+    fn cast_into(self) -> i32 {
+        self as i32
+    }
+}
+
+impl CastInto<u8> for i32 {
+    fn cast_into(self) -> u8 {
+        self as u8
+    }
+}
+
+pub trait Sample: Sized + CubePrimitive {
+    fn sample<R: Runtime>(client: &ComputeClient<R>, shape: &[usize], seed: u64)
+    -> TensorHandle<R>;
+}
+
+macro_rules! sample_float {
+    ($($t:ty),*) => {
+        $(
+            impl Sample for $t
+            {
+                fn sample<R: Runtime>(client: &ComputeClient<R>, shape: &[usize], seed: u64) -> TensorHandle<R> {
+                    cubek_random::seed(seed);
+                    let dtype = Self::as_type_native_unchecked();
+                    let output = TensorHandle::empty(client, shape.to_vec(), dtype);
+
+                    cubek_random::random_uniform(&client, f32::from_int(-1), f32::from_int(1), output.as_ref(), dtype).unwrap();
+
+                    output
+                }
+            }
+        )*
+    };
+}
+
+sample_float!(half::f16);
+sample_float!(half::bf16);
+sample_float!(f32);
+sample_float!(f64);
+sample_float!(u8);
+
+impl Sample for flex32 {
+    fn sample<R: Runtime>(
+        client: &ComputeClient<R>,
+        shape: &[usize],
+        seed: u64,
+    ) -> TensorHandle<R> {
+        cubek_random::seed(seed);
+        let dtype = f32::as_type_native_unchecked();
+        let output = TensorHandle::empty(client, shape.to_vec(), dtype);
+
+        cubek_random::random_uniform(
+            client,
+            f32::from_int(-1),
+            f32::from_int(1),
+            output.as_ref(),
+            dtype,
+        )
+        .unwrap();
+
+        output
+    }
+}
+
+impl Sample for tf32 {
+    fn sample<R: Runtime>(
+        client: &ComputeClient<R>,
+        shape: &[usize],
+        seed: u64,
+    ) -> TensorHandle<R> {
+        cubek_random::seed(seed);
+        let dtype = f32::as_type_native_unchecked();
+        let output = TensorHandle::empty(client, shape.to_vec(), dtype);
+
+        cubek_random::random_uniform(
+            client,
+            f32::from_int(-1),
+            f32::from_int(1),
+            output.as_ref(),
+            dtype,
+        )
+        .unwrap();
+
+        output
+    }
 }

@@ -60,3 +60,4 @@ serde = { workspace = true }
 trybuild = "1"
 pretty_assertions = { workspace = true }
 cubecl = { workspace = true, features = ["test-runtime"] }
+cubek-random = { path = "../cubek-random", default-features = false, version = "0.0.1" }

@@ -1,13 +1,8 @@
-use crate::components::ConvGemmConfig;
+use crate::suite::test_utils::{Sample, TensorRawParts};
 use cubecl::prelude::*;
 use cubecl::{CubeElement, server::Allocation};
-use cubek_matmul::components::{InputArg, MatmulSelection, OutputArg};
-use cubek_matmul::components::{MatmulElems, MatmulIdent};
-use cubek_matmul::tests::layered::matmul_test_launcher::TensorRawParts;
-use cubek_matmul::tests::test_utils::Sample;
-use cubek_matmul::{MatmulInputHandleRef, components::AvailableLineSizes};
-
-use crate::{
+use cubek_convolution::components::ConvGemmConfig;
+use cubek_convolution::{
     components::{
         ConvolutionProblem,
         global::{
@@ -17,6 +12,9 @@ use crate::{
     },
     kernels::layered::algorithm::Algorithm,
 };
+use cubek_matmul::components::{InputArg, MatmulSelection, OutputArg};
+use cubek_matmul::components::{MatmulElems, MatmulIdent};
+use cubek_matmul::{MatmulInputHandleRef, components::AvailableLineSizes};
 
 use super::test_utils::TestPrecision;
 

@@ -1,5 +1,5 @@
+use cubecl;
 use cubecl::prelude::*;
-use cubecl as cubecl;
 
 use crate::components::stage::{MaskTile, PartitionAttentionConfig};
 use crate::components::tile::TileAttention;

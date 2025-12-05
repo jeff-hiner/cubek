@@ -1,15 +1,11 @@
-use crate::{
-    components::{
-        ConvolutionProblem, Dimensionality,
-        global::args::{ConcreteInputsFactory, ConcreteOutputFactory},
-    },
-    tests::test_utils::TestPrecision,
-};
-use crate::{
-    kernels::layered::algorithm::Algorithm,
-    tests::convolution_test_launcher::test_convolution_algorithm,
-};
+use crate::suite::convolution_test_launcher::test_convolution_algorithm;
+use crate::suite::test_utils::TestPrecision;
 use cubecl::Runtime;
+use cubek_convolution::components::{
+    ConvolutionProblem, Dimensionality,
+    global::args::{ConcreteInputsFactory, ConcreteOutputFactory},
+};
+use cubek_convolution::kernels::layered::algorithm::Algorithm;
 use cubek_matmul::components::{InputArg, OutputArg};
 use cubek_matmul::components::{MatmulSelection, MatrixLayout};
 

@@ -1,9 +1,9 @@
 use cubecl::prelude::*;
-use cubecl::{self as cubecl};
 use cubecl::std::{
     CubeOption, CubeOptionArgs, CubeOptionExpand,
     tensor::r#virtual::{VirtualTensorOperations, VirtualTensorOperationsExpand},
 };
+use cubecl::{self as cubecl};
 
 use crate::components::{
     blueprint::AttentionBlueprint, line_size::AttentionLineSizes, problem::AttentionProblem,

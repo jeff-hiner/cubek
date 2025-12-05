@@ -1,10 +1,10 @@
 use crate::components::{AttentionTileSize, attention_types::*};
-use cubecl as cubecl;
+use cubecl;
 use cubecl::prelude::*;
-use cubek_matmul::components::global::memory::GlobalMemoryConfig;
-use cubek_matmul::components::tile::StridedTile;
 use cubecl::std::Swizzle;
 use cubecl::std::tensor::{View, layout::Coords2d};
+use cubek_matmul::components::global::memory::GlobalMemoryConfig;
+use cubek_matmul::components::tile::StridedTile;
 
 use crate::components::AttentionPrecision;
 use crate::components::stage::AttentionPartitioner;

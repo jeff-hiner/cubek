@@ -2,4 +2,7 @@ mod convolution_test_launcher;
 pub mod test_macros;
 mod test_utils;
 
-pub use test_macros::suite::*;
+
+mod accelerated {
+    crate::testgen_convolution_accelerated!();
+}

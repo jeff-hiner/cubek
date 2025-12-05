@@ -8,7 +8,7 @@ use crate::components::args::TensorValue;
 use crate::components::batch::BatchAttentionFamily;
 use crate::components::batch::CubeCountInput;
 use crate::components::batch::base::BatchAttention;
-use cubecl as cubecl;
+use cubecl;
 use cubecl::prelude::*;
 use cubecl::std::tensor::r#virtual::VirtualTensor;
 use cubecl::std::{CubeOption, CubeOptionExpand};

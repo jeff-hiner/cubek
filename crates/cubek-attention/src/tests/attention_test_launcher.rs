@@ -1,7 +1,7 @@
 use cubecl::prelude::*;
 use cubecl::server::Allocation;
-use cubecl::{CubeElement, server};
 use cubecl::std::CubeOptionArgs;
+use cubecl::{CubeElement, server};
 
 use crate::components::AttentionIdent;
 use crate::components::args::{TensorArgs, TensorInputsLaunch};

@@ -1,4 +1,4 @@
-use cubecl as cubecl;
+use cubecl;
 use cubecl::prelude::*;
 
 use crate::components::tile::FULLY_MASKED_ROW_THRESHOLD;

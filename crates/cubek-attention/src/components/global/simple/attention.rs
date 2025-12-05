@@ -1,10 +1,10 @@
-use cubecl as cubecl;
+use cubecl;
 use cubecl::prelude::*;
+use cubecl::std::tensor::r#virtual::VirtualTensor;
+use cubecl::std::{CubeOption, CubeOptionExpand};
 use cubek_matmul::components::global::PartitionedStage;
 use cubek_matmul::components::global::read::FullStageGlobalReader;
 use cubek_matmul::components::stage::StridedStageMemory;
-use cubecl::std::tensor::r#virtual::VirtualTensor;
-use cubecl::std::{CubeOption, CubeOptionExpand};
 use std::marker::PhantomData;
 
 use crate::components::attention_types::*;

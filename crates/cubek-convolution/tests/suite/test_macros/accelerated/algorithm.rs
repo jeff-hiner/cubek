@@ -1,10 +1,10 @@
 #[macro_export]
 macro_rules! testgen_convolution_accelerated_algorithm {
     () => {
-        use $crate::kernels::layered::{
+        use cubek_convolution::kernels::layered::{
             simple::SimpleConvAlgorithm,
         };
-        use $crate::components::global::read::strategy::{
+        use cubek_convolution::components::global::read::strategy::{
             async_full_cyclic,
             async_full_strided,
         };
