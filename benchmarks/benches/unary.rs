@@ -105,12 +105,5 @@ fn run<R: Runtime, E: frontend::Float>(device: R::Device, vectorization: u8) {
 }
 
 fn main() {
-    #[cfg(feature = "cuda")]
-    run::<cubecl::cuda::CudaRuntime, f16>(Default::default(), 8);
-    #[cfg(feature = "cuda")]
-    run::<cubecl::cuda::CudaRuntime, f32>(Default::default(), 4);
-    #[cfg(feature = "wgpu")]
-    run::<cubecl::wgpu::WgpuRuntime, f32>(Default::default(), 1);
-    #[cfg(feature = "wgpu")]
-    run::<cubecl::wgpu::WgpuRuntime, f32>(Default::default(), 4);
+    run::<cubecl::TestRuntime, f32>(Default::default(), 4);
 }

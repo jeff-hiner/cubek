@@ -18,6 +18,7 @@ version.workspace = true
 [dependencies]
 cubek = { path = "../crates/cubek", version = "0.0.1", default-features = false, features = [
     "random",
+    "reduce",
     "matmul",
     "convolution",
     "attention",
@@ -28,6 +29,10 @@ half = { workspace = true }
 [[bench]]
 harness = false
 name = "matmul"
+
+[[bench]]
+harness = false
+name = "reduce"
 
 [[bench]]
 harness = false
