@@ -1,9 +1,8 @@
+use std::cmp::max;
+
 use cubecl::prelude::*;
 use cubecl::std::tensor::layout::plain::{PlainLayout, PlainLayoutLaunch};
-use cubecl::std::tensor::layout::{
-    Coords1d, Coords3d, Layout, LayoutExpand,
-    linear::{LinearLayout, LinearLayoutArgs},
-};
+use cubecl::std::tensor::layout::{Coords1d, Coords3d, Layout, LayoutExpand};
 
 #[derive(CubeType, CubeLaunch, Clone)]
 /// A 3D tile (batch, group, vec)
@@ -36,7 +35,7 @@ impl<'a, R: Runtime> GroupedVectorLayoutLaunch<'a, R> {
         let mut stride_group = 1u32;
         let mut done = false;
 
-        for (axis, shape) in strides.iter().enumerate().rev() {
+        for (axis, stride) in strides.iter().enumerate().rev() {
             if axis == vectorization_axis as usize {
                 done = true;
                 assert!(strides[axis] == 1);
@@ -44,14 +43,11 @@ impl<'a, R: Runtime> GroupedVectorLayoutLaunch<'a, R> {
             }
 
             if !done {
-                stride_group *= *shape as u32;
+                stride_group *= *stride as u32 / line_size as u32;
             } else {
-                stride_batch *= *shape as u32;
+                stride_batch *= *stride as u32 / line_size as u32;
             }
         }
-
-        stride_batch /= line_size as u32;
-        stride_group /= line_size as u32;
 
         println!("strides_batch: {stride_batch} lines");
         println!("strides_group: {stride_group} lines");
@@ -116,7 +112,6 @@ mod tests {
             shape: vec![4, 4, 4],
             transposed: false,
             line_size: 4,
-            axis: 2,
             expected: vec![0.0, 1.0, 2.0, 3.0],
             batch: 0,
             group: 0,
@@ -131,7 +126,6 @@ mod tests {
             shape: vec![4, 4, 4],
             transposed: false,
             line_size: 4,
-            axis: 2,
             expected: vec![40.0, 41.0, 42.0, 43.0],
             batch: 2,
             group: 2,
@@ -146,7 +140,6 @@ mod tests {
             shape: vec![4, 4, 4],
             transposed: true,
             line_size: 4,
-            axis: 1,
             expected: vec![0.0, 4.0, 8.0, 12.0],
             batch: 0,
             group: 0,
@@ -161,8 +154,7 @@ mod tests {
             shape: vec![3, 4, 2],
             transposed: true,
             line_size: 2,
-            axis: 1,
-            expected: vec![0.0, 4.0, 8.0, 12.0],
+            expected: vec![1.0, 3.0],
             batch: 0,
             group: 1,
             pos: 0,
@@ -186,7 +178,6 @@ mod tests {
         shape: Vec<usize>,
         transposed: bool,
         line_size: u8,
-        axis: u8,
         expected: Vec<f32>,
         batch: u32,
         group: u32,
@@ -203,56 +194,58 @@ mod tests {
             output
         }
 
-        fn run(self) {
-            let client = TestRuntime::client(&Default::default());
-
-            let num_elems = self.shape.iter().product::<usize>();
+        fn arange_input(
+            client: &ComputeClient<TestRuntime>,
+            shape: &[usize],
+            transposed: bool,
+        ) -> TensorHandle<TestRuntime> {
+            let storage = f32::as_type_native_unchecked();
+            let num_elems = shape.iter().product::<usize>();
             let elems: Vec<f32> = (0..num_elems).into_iter().map(|e| e as f32).collect();
             let bytes = Bytes::from_elems(elems);
-            let alloc = client.create_tensor(bytes, &self.shape, core::mem::size_of::<f32>());
+            let alloc = client.create_tensor(bytes, &shape, storage.size());
 
-            let (handle, shape, strides) = if self.transposed {
+            if transposed {
                 // We only transpose the strides to generate not contiguous data.
                 let strides = Self::transpose(&alloc.strides);
-                let shape = Self::transpose(&self.shape);
-                println!("Shape: {shape:?} Strides: {strides:?}");
-                {
-                    let output = client.read_one(alloc.handle.clone());
-                    let elems = output.elems::<f32>().unwrap();
-                    println!("{elems:?}");
-                };
-
+                let shape = Self::transpose(shape);
                 let handle = TensorHandle::new(
                     alloc.handle,
                     shape.clone(),
                     strides.clone(),
                     f32::as_type_native_unchecked(),
                 );
-                let result =
-                    into_contiguous(&client, &handle.as_ref(), f32::as_type_native_unchecked())
-                        .unwrap();
-
-                {
-                    let output = client.read_one(result.handle.clone());
-                    let elems = output.elems::<f32>().unwrap();
-                    println!("{elems:?}");
-                };
+                let result = into_contiguous(&client, &handle.as_ref(), storage).unwrap();
                 let strides = Self::transpose(&result.strides);
-                (result.handle, shape, strides)
+                TensorHandle::new(
+                    result.handle,
+                    shape,
+                    strides,
+                    f32::as_type_native_unchecked(),
+                )
             } else {
-                (alloc.handle, self.shape, alloc.strides)
-            };
-            println!("Shape: {shape:?} Strides: {strides:?}");
+                TensorHandle::new(alloc.handle, shape.to_vec(), alloc.strides, storage)
+            }
+        }
 
+        fn run(self) {
+            let client = TestRuntime::client(&Default::default());
+            let input = Self::arange_input(&client, &self.shape, self.transposed);
+            let axis = if self.transposed { 1 } else { 2 };
             let grouped_vector = GroupedVectorLayoutLaunch::from_shape_strides(
-                &shape,
-                &strides,
+                &input.shape,
+                &input.strides,
                 self.line_size,
-                self.axis,
+                axis,
             );
 
-            let buffer: ArrayArg<'_, TestRuntime> =
-                unsafe { ArrayArg::from_raw_parts::<f32>(&handle, num_elems, self.line_size) };
+            let buffer: ArrayArg<'_, TestRuntime> = unsafe {
+                ArrayArg::from_raw_parts::<f32>(
+                    &input.handle,
+                    input.shape.iter().product(),
+                    self.line_size,
+                )
+            };
 
             let input = ViewArg::<'_, Coords3d, TestRuntime>::new::<GroupedVectorLayout>(
                 buffer,
