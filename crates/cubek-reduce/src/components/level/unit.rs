@@ -7,6 +7,20 @@ use crate::{
 };
 use cubecl::prelude::*;
 
+#[derive(Clone)]
+pub struct UnitReduceConfig {
+    line_size: u32,
+    line_mode: LineMode,
+}
+
+impl UnitReduceConfig {
+    pub fn new(input_line_size: u32, line_mode: LineMode) -> Self {
+        Self {
+            line_size: input_line_size,
+            line_mode,
+        }
+    }
+}
 /// Use an individual unit to reduce the `items` with the specified range.
 /// That is, this will reduces `items[range.start]`, `items[range.start + range.step]`
 /// until `items[range.end]` (exclusive).
@@ -20,10 +34,9 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
     items: &I,
     partition: ReducePartition,
     inst: &R,
-    #[comptime] line_size: u32,
-    #[comptime] line_mode: LineMode,
+    #[comptime] config: UnitReduceConfig,
 ) -> R::AccumulatorItem {
-    let mut accumulator = R::null_accumulator(inst, line_size);
+    let mut accumulator = R::null_accumulator(inst, config.line_size);
 
     let mut index = partition.index_start;
     for coordinate in range_stepped(
@@ -33,7 +46,11 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
     ) {
         let requirements = R::requirements(inst);
         let coordinates = if comptime![requirements.coordinates] {
-            ReduceCoordinate::new_Required(fill_coordinate_line(coordinate, line_size, line_mode))
+            ReduceCoordinate::new_Required(fill_coordinate_line(
+                coordinate,
+                config.line_size,
+                config.line_mode,
+            ))
         } else {
             ReduceCoordinate::new_NotRequired()
         };

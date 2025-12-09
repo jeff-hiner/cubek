@@ -4,8 +4,26 @@ use crate::{
         instructions::*, level::fill_coordinate_line, partition::ReducePartition,
         precision::ReducePrecision,
     },
+    routines::PlaneReduceBlueprint,
 };
 use cubecl::prelude::*;
+
+#[derive(Clone)]
+pub struct PlaneReduceConfig {
+    line_size: u32,
+    line_mode: LineMode,
+    bound_checks: BoundChecksInner,
+}
+
+impl PlaneReduceConfig {
+    pub fn new(input_line_size: u32, line_mode: LineMode, blueprint: PlaneReduceBlueprint) -> Self {
+        Self {
+            line_size: input_line_size,
+            line_mode,
+            bound_checks: blueprint.bound_checks_inner,
+        }
+    }
+}
 
 /// Use an individual plane  to reduce the `items` with the specified range.
 /// That is, this will reduces `items[range.start]`, `items[range.start + range.step]`
@@ -24,13 +42,11 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
     items: &I,
     inst: &R,
     partition: ReducePartition,
-    #[comptime] line_size: u32,
-    #[comptime] line_mode: LineMode,
-    #[comptime] bound_checks: BoundChecksInner,
+    #[comptime] config: PlaneReduceConfig,
 ) -> R::AccumulatorItem {
     let plane_dim = CUBE_DIM_X;
 
-    let mut accumulator = R::null_accumulator(inst, line_size);
+    let mut accumulator = R::null_accumulator(inst, config.line_size);
 
     let mut first_index = partition.index_start;
     for first_coordinate in range_stepped(
@@ -38,8 +54,8 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
         partition.coordinate_end,
         partition.coordinate_step,
     ) {
-        let unit_coordinate_offset = match line_mode {
-            LineMode::Parallel => UNIT_POS_X * line_size,
+        let unit_coordinate_offset = match config.line_mode {
+            LineMode::Parallel => UNIT_POS_X * config.line_size,
             LineMode::Perpendicular => UNIT_POS_X,
         };
         let unit_coordinate = first_coordinate + unit_coordinate_offset;
@@ -48,26 +64,30 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
         let coordinates = if comptime![requirements.coordinates] {
             ReduceCoordinate::new_Required(fill_coordinate_line(
                 unit_coordinate,
-                line_size,
-                line_mode,
+                config.line_size,
+                config.line_mode,
             ))
         } else {
             ReduceCoordinate::new_NotRequired()
         };
 
         let index = first_index + UNIT_POS_X * partition.index_step;
-        let item = match bound_checks {
+        let item = match config.bound_checks {
             BoundChecksInner::None => items.read(index),
             BoundChecksInner::Mask => {
                 let mask = unit_coordinate < partition.coordinate_end;
                 let index = index * u32::cast_from(mask);
-                select(mask, items.read(index), R::null_input(inst, line_size))
+                select(
+                    mask,
+                    items.read(index),
+                    R::null_input(inst, config.line_size),
+                )
             }
             BoundChecksInner::Branch => {
                 if unit_coordinate < partition.coordinate_end {
                     items.read(index)
                 } else {
-                    R::null_input(inst, line_size)
+                    R::null_input(inst, config.line_size)
                 }
             }
         };

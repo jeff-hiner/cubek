@@ -4,7 +4,10 @@ use crate::{
         instructions::*,
     },
     launch::{ReduceLaunchInfo, ReduceStrategy},
-    routines::{ReduceBlueprint, reduce_kernel_virtual},
+    routines::{
+        CubeReduceBlueprint, PlaneReduceBlueprint, ReduceBlueprint, ReduceBlueprintKind,
+        reduce_kernel_virtual,
+    },
 };
 use cubecl::prelude::*;
 
@@ -24,35 +27,43 @@ pub(crate) fn launch_reduce<Run: Runtime>(
     input: TensorHandleRef<Run>,
     output: TensorHandleRef<Run>,
     axis: u32,
-    config: ReduceLaunchInfo,
+    info: ReduceLaunchInfo,
     strategy: ReduceStrategy,
     dtypes: ReduceDtypes,
     inst: ReduceOperationConfig,
 ) -> Result<(), LaunchError> {
-    let settings = ReduceBlueprint {
-        shared: strategy.shared.then(|| {
-            if strategy.use_planes {
-                config.cube_dim.y
-            } else {
-                config.cube_dim.num_elems()
-            }
+    let kind = match (strategy.shared, strategy.use_planes) {
+        (true, true) => ReduceBlueprintKind::Cube(CubeReduceBlueprint {
+            accumulator_size: info.cube_dim.y,
+            bound_checks_inner: info.bound_checks_inner,
+            use_planes: true,
         }),
-        use_planes: strategy.use_planes,
-        line_size_input: config.line_size_input,
-        line_size_output: config.line_size_output,
-        line_mode: config.line_mode,
-        bound_checks: config.bound_checks,
-        bound_checks_inner: config.bound_checks_inner,
+        (true, false) => ReduceBlueprintKind::Cube(CubeReduceBlueprint {
+            accumulator_size: info.cube_dim.num_elems(),
+            bound_checks_inner: info.bound_checks_inner,
+            use_planes: false,
+        }),
+        (false, true) => ReduceBlueprintKind::Plane(PlaneReduceBlueprint {
+            bound_checks_inner: info.bound_checks_inner,
+        }),
+        (false, false) => ReduceBlueprintKind::Unit,
     };
+
+    let blueprint = ReduceBlueprint {
+        line_mode: info.line_mode,
+        bound_checks: info.bound_checks,
+        kind,
+    };
+
     unsafe {
         reduce_kernel::launch_unchecked::<TensorArgs, Run>(
             client,
-            config.cube_count,
-            config.cube_dim,
-            input.as_tensor_arg(config.line_size_input as u8),
-            output.as_tensor_arg(config.line_size_output as u8),
+            info.cube_count,
+            info.cube_dim,
+            input.as_tensor_arg(info.line_size_input as u8),
+            output.as_tensor_arg(info.line_size_output as u8),
             ScalarArg::new(axis),
-            settings,
+            blueprint,
             inst,
             dtypes.input,
             dtypes.output,
@@ -66,12 +77,12 @@ pub fn reduce_kernel<In: Numeric, Out: Numeric, Acc: Numeric, RA: ReduceArgs>(
     input: &RA::Input<In>,
     output: &mut RA::Output<Out>,
     axis_reduce: u32,
-    #[comptime] params: ReduceBlueprint,
+    #[comptime] blueprint: ReduceBlueprint,
     #[comptime] config: ReduceOperationConfig,
     #[define(In)] _input_dtype: StorageType,
     #[define(Out)] _output_dtype: StorageType,
     #[define(Acc)] _acc_dtype: StorageType,
 ) {
     let (input, mut output) = init_tensors::<RA, In, Out>(input, output);
-    reduce_kernel_virtual::<In, Out, Acc>(&input, &mut output, axis_reduce, params, config);
+    reduce_kernel_virtual::<In, Out, Acc>(&input, &mut output, axis_reduce, blueprint, config);
 }

@@ -4,8 +4,30 @@ use crate::{
         instructions::*, level::fill_coordinate_line, partition::ReducePartition,
         precision::ReducePrecision,
     },
+    routines::CubeReduceBlueprint,
 };
 use cubecl::prelude::*;
+
+#[derive(Clone)]
+pub struct ReduceCubeConfig {
+    pub accumulator_size: u32,
+    pub line_size: u32,
+    pub line_mode: LineMode,
+    pub use_planes: bool,
+    pub bound_checks: BoundChecksInner,
+}
+
+impl ReduceCubeConfig {
+    pub fn new(input_line_size: u32, line_mode: LineMode, blueprint: CubeReduceBlueprint) -> Self {
+        Self {
+            accumulator_size: blueprint.accumulator_size,
+            line_mode,
+            line_size: input_line_size,
+            use_planes: blueprint.use_planes,
+            bound_checks: blueprint.bound_checks_inner,
+        }
+    }
+}
 
 /// Use an individual cube to reduce the `items` with the specified range.
 /// That is, this will reduces `items[range.start]`, `items[range.start + range.step]`
@@ -24,24 +46,20 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
     items: &I,
     inst: &R,
     partition: ReducePartition,
-    #[comptime] accumulator_size: u32,
-    #[comptime] line_size: u32,
-    #[comptime] line_mode: LineMode,
-    #[comptime] use_planes: bool,
-    #[comptime] bound_checks: BoundChecksInner,
+    #[comptime] config: ReduceCubeConfig,
 ) -> R::AccumulatorItem {
     let mut accumulator = reduce_slice::<P, I, R>(
         items,
         inst,
         partition,
-        accumulator_size,
-        line_size,
-        line_mode,
-        use_planes,
-        bound_checks,
+        config.accumulator_size,
+        config.line_size,
+        config.line_mode,
+        config.use_planes,
+        config.bound_checks,
     );
     sync_cube();
-    reduce_tree::<P, R>(inst, &mut accumulator, accumulator_size)
+    reduce_tree::<P, R>(inst, &mut accumulator, config.accumulator_size)
 }
 
 /// Use an individual cube to reduce the `items` with the specified range.
@@ -68,7 +86,10 @@ fn reduce_slice<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P
     #[comptime] bound_checks: BoundChecksInner,
 ) -> R::SharedAccumulator {
     // The index used to read and write into the accumulator.
-    let accumulator_index = if use_planes { UNIT_POS_Y } else { UNIT_POS };
+    let accumulator_index = match use_planes {
+        true => UNIT_POS_Y,
+        false => UNIT_POS,
+    };
 
     let requirements = R::requirements(inst);
     let mut accumulator =

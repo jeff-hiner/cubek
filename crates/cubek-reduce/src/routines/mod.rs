@@ -1,3 +1,4 @@
+pub mod reduce_dim;
 pub mod shared_sum;
 
 mod base;
