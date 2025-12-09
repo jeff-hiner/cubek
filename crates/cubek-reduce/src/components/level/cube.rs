@@ -1,0 +1,198 @@
+use crate::{
+    BoundChecksInner, LineMode,
+    components::{
+        instructions::*, level::fill_coordinate_line, precision::ReducePrecision,
+        range::ReduceRange,
+    },
+};
+use cubecl::prelude::*;
+
+/// Use an individual cube to reduce the `items` with the specified range.
+/// That is, this will reduces `items[range.start]`, `items[range.start + range.step]`
+/// until `items[range.end]` (exclusive). Inside a cube, the reduction will use plane operations
+/// if `use_planes` is set to `true`.
+///
+/// This reduces using the given `line_mode` but doesn't reduce the accumulator itself.
+///
+/// When `use_planes` is `true`, this assumes that `UNIT_POS_Y` provides the relative position
+/// of a plane within its cube.
+///
+/// Since each individual cube performs a reduction, this function is meant to be called
+/// with either a different `items` for each cube, a different `range` or both based on `CUBE_POS`.
+#[cube]
+pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>(
+    items: &I,
+    inst: &R,
+    range: ReduceRange,
+    #[comptime] accumulator_size: u32,
+    #[comptime] line_size: u32,
+    #[comptime] line_mode: LineMode,
+    #[comptime] use_planes: bool,
+    #[comptime] bound_checks: BoundChecksInner,
+) -> R::AccumulatorItem {
+    let mut accumulator = reduce_slice::<P, I, R>(
+        items,
+        inst,
+        range,
+        accumulator_size,
+        line_size,
+        line_mode,
+        use_planes,
+        bound_checks,
+    );
+    sync_cube();
+    reduce_tree::<P, R>(inst, &mut accumulator, accumulator_size)
+}
+
+/// Use an individual cube to reduce the `items` with the specified range.
+/// That is, this will reduces `items[range.start]`, `items[range.start + range.step]`
+/// until `items[range.end]` (exclusive). Inside a cube, the reduction will use plane operations
+/// if `use_planes` is set to `true`.
+///
+/// This reduces using the given `line_mode` but doesn't reduce the accumulator itself.
+///
+/// When `use_planes` is `true`, this assumes that `UNIT_POS_Y` provides the relative position
+/// of a plane within its cube.
+///
+/// Since each individual cube performs a reduction, this function is meant to be called
+/// with either a different `items` for each cube, a different `range` or both based on `CUBE_POS`.
+#[cube]
+fn reduce_slice<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>(
+    items: &I,
+    inst: &R,
+    range: ReduceRange,
+    #[comptime] accumulator_size: u32,
+    #[comptime] line_size: u32,
+    #[comptime] line_mode: LineMode,
+    #[comptime] use_planes: bool,
+    #[comptime] bound_checks: BoundChecksInner,
+) -> R::SharedAccumulator {
+    // The index used to read and write into the accumulator.
+    let accumulator_index = if use_planes { UNIT_POS_Y } else { UNIT_POS };
+
+    let requirements = R::requirements(inst);
+    let mut accumulator =
+        R::SharedAccumulator::allocate(accumulator_size, line_size, requirements.coordinates);
+
+    R::SharedAccumulator::write(
+        &mut accumulator,
+        accumulator_index,
+        R::null_accumulator(inst, line_size),
+    );
+
+    let mut first_index = range.index_start;
+    for first_coordinate in range_stepped(
+        range.coordinate_start,
+        range.coordinate_end,
+        range.coordinate_step,
+    ) {
+        let unit_coordinate_offset = match line_mode {
+            LineMode::Parallel => UNIT_POS * line_size,
+            LineMode::Perpendicular => UNIT_POS,
+        };
+        let unit_coordinate = first_coordinate + unit_coordinate_offset;
+
+        let index = first_index + UNIT_POS * range.index_step;
+
+        let item = match bound_checks {
+            BoundChecksInner::None => items.read(index),
+            BoundChecksInner::Mask => {
+                let mask = unit_coordinate < range.coordinate_end;
+                let index = index * u32::cast_from(mask);
+                select(mask, items.read(index), R::null_input(inst, line_size))
+            }
+            BoundChecksInner::Branch => {
+                if unit_coordinate < range.coordinate_end {
+                    items.read(index)
+                } else {
+                    R::null_input(inst, line_size)
+                }
+            }
+        };
+
+        let coordinates = if comptime! {requirements.coordinates} {
+            let coordinate = fill_coordinate_line(unit_coordinate, line_size, line_mode);
+            let coordinate = select(
+                unit_coordinate < range.coordinate_end,
+                coordinate,
+                Line::empty(line_size).fill(u32::MAX),
+            );
+
+            ReduceCoordinate::new_Required(coordinate)
+        } else {
+            ReduceCoordinate::new_NotRequired()
+        };
+
+        reduce_shared_inplace::<P, R>(
+            inst,
+            &mut accumulator,
+            accumulator_index,
+            item,
+            coordinates,
+            use_planes,
+        );
+        first_index += range.index_step * CUBE_DIM;
+    }
+    accumulator
+}
+
+/// Use all units within a cube to fuse the first `size` elements of `accumulator` inplace like this with some padding if `size` is not a power of 2.
+///
+///
+/// ```ignored
+///
+///     0   1   2   3   4   5   6   7
+///     |   |   |   |   |   |   |   |
+///     +---+   +---+   +---+   +---+
+///     |       |       |       |
+///     +-------+       +-------+
+///     |               |
+///     +---------------+
+///     |
+///     *
+///
+/// ```
+///
+/// The outcome is stored in the first element of the accumulator and also returned by this function for convenience.
+///
+/// Since each individual cube performs a reduction, this function is meant to be called
+/// with a different `accumulator` for each cube based on `CUBE_POS`.
+///
+/// There is no out-of-bound check, so it is the responsibility of the caller to ensure that `size` is at most the length
+/// of the shared memory and that there are at least `size` units within each cube.
+#[cube]
+fn reduce_tree<P: ReducePrecision, Inst: ReduceInstruction<P>>(
+    inst: &Inst,
+    accumulator: &mut Inst::SharedAccumulator,
+    #[comptime] size: u32,
+) -> Inst::AccumulatorItem {
+    if comptime!(size.is_power_of_two()) {
+        let mut num_active_units = size.runtime();
+        let mut jump = 1;
+        while num_active_units > 1 {
+            num_active_units /= 2;
+            let destination = jump * 2 * UNIT_POS;
+            let origin = jump * (2 * UNIT_POS + 1);
+            if UNIT_POS < num_active_units {
+                fuse_accumulator_inplace::<P, Inst>(inst, accumulator, destination, origin);
+            }
+            jump *= 2;
+            sync_cube();
+        }
+    } else {
+        let mut num_remaining_items = size.runtime();
+        let mut jump = 1;
+        while num_remaining_items > 1 {
+            let destination = jump * 2 * UNIT_POS;
+            let origin = jump * (2 * UNIT_POS + 1);
+            if UNIT_POS < num_remaining_items / 2 {
+                fuse_accumulator_inplace::<P, Inst>(inst, accumulator, destination, origin);
+            }
+            num_remaining_items = num_remaining_items.div_ceil(2);
+            jump *= 2;
+            sync_cube();
+        }
+    }
+    sync_cube();
+    Inst::SharedAccumulator::read(accumulator, 0)
+}

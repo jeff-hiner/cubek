@@ -1,27 +1,20 @@
-use cubecl::prelude::*;
-
-use crate::precision::ReducePrecision;
-
 use super::{
     ArgAccumulator, ReduceCoordinate, ReduceCoordinateExpand, ReduceFamily, ReduceInstruction,
-    ReduceRequirements, lowest_coordinate_matching,
+    lowest_coordinate_matching,
 };
+use crate::{components::instructions::ReduceRequirements, components::precision::ReducePrecision};
+use cubecl::prelude::*;
 
 /// Compute the coordinate of the maximum item returning the smallest coordinate in case of equality.
 #[derive(Debug, CubeType, Clone)]
-pub struct ArgMin {}
-
-impl ReduceFamily for ArgMin {
-    type Instruction<P: ReducePrecision> = Self;
-    type Config = ();
-}
+pub struct ArgMax {}
 
 #[cube]
-impl ArgMin {
+impl ArgMax {
     /// Compare two pairs of items and coordinates and return a new pair
-    /// where each element in the lines is the minimal item with its coordinate.
+    /// where each element in the lines is the maximal item with its coordinate.
     /// In case of equality, the lowest coordinate is selected.
-    pub fn choose_argmin<N: Numeric>(
+    pub fn choose_argmax<N: Numeric>(
         items0: Line<N>,
         coordinates0: Line<u32>,
         items1: Line<N>,
@@ -30,7 +23,7 @@ impl ArgMin {
         let to_keep = select_many(
             items0.equal(items1),
             coordinates0.less_than(coordinates1),
-            items0.less_than(items1),
+            items0.greater_than(items1),
         );
         let items = select_many(to_keep, items0, items1);
         let coordinates = select_many(to_keep, coordinates0, coordinates1);
@@ -38,8 +31,13 @@ impl ArgMin {
     }
 }
 
+impl ReduceFamily for ArgMax {
+    type Instruction<P: ReducePrecision> = Self;
+    type Config = ();
+}
+
 #[cube]
-impl<P: ReducePrecision> ReduceInstruction<P> for ArgMin {
+impl<P: ReducePrecision> ReduceInstruction<P> for ArgMax {
     type AccumulatorItem = (Line<P::EA>, Line<u32>);
     type SharedAccumulator = ArgAccumulator<P::EA>;
     type Config = ();
@@ -47,17 +45,18 @@ impl<P: ReducePrecision> ReduceInstruction<P> for ArgMin {
     fn requirements(_this: &Self) -> ReduceRequirements {
         ReduceRequirements { coordinates: true }
     }
+
     fn from_config(_config: Self::Config) -> Self {
-        ArgMin {}
+        ArgMax {}
     }
 
     fn null_input(_this: &Self, #[comptime] line_size: u32) -> Line<P::EI> {
-        Line::empty(line_size).fill(P::EI::max_value())
+        Line::empty(line_size).fill(P::EI::min_value())
     }
 
     fn null_accumulator(_this: &Self, #[comptime] line_size: u32) -> Self::AccumulatorItem {
         (
-            Line::empty(line_size).fill(P::EA::max_value()),
+            Line::empty(line_size).fill(P::EA::min_value()),
             Line::empty(line_size).fill(u32::MAX),
         )
     }
@@ -88,18 +87,18 @@ impl<P: ReducePrecision> ReduceInstruction<P> for ArgMin {
         };
 
         let (candidate_item, candidate_coordinate) = if use_planes {
-            let candidate_item = plane_min(item);
+            let candidate_item = plane_max(item);
             let candidate_coordinate = lowest_coordinate_matching(candidate_item, item, coordinate);
             (candidate_item, candidate_coordinate)
         } else {
             (item, coordinate)
         };
 
-        Self::choose_argmin(
-            accumulator.0,
-            accumulator.1,
+        Self::choose_argmax(
             Line::cast_from(candidate_item),
             candidate_coordinate,
+            accumulator.0,
+            accumulator.1,
         )
     }
 
@@ -108,7 +107,7 @@ impl<P: ReducePrecision> ReduceInstruction<P> for ArgMin {
         lhs: Self::AccumulatorItem,
         rhs: Self::AccumulatorItem,
     ) -> Self::AccumulatorItem {
-        Self::choose_argmin(lhs.0, lhs.1, rhs.0, rhs.1)
+        Self::choose_argmax(lhs.0, lhs.1, rhs.0, rhs.1)
     }
 
     fn merge_line<Out: Numeric>(
@@ -118,18 +117,16 @@ impl<P: ReducePrecision> ReduceInstruction<P> for ArgMin {
     ) -> Out {
         let line_size = accumulator.0.size();
         if comptime!(line_size > 1) {
-            let mut min = P::EA::max_value();
+            let mut max = P::EA::min_value();
             let mut coordinate = u32::MAX.runtime();
-
             #[unroll]
             for k in 0..line_size {
                 let acc_element = accumulator.0[k];
                 let acc_coordinate = accumulator.1[k];
-                // TODO replace with select
-                if acc_element == min && acc_coordinate < coordinate {
+                if acc_element == max && acc_coordinate < coordinate {
                     coordinate = acc_coordinate;
-                } else if acc_element < min {
-                    min = acc_element;
+                } else if acc_element > max {
+                    max = acc_element;
                     coordinate = acc_coordinate;
                 }
             }

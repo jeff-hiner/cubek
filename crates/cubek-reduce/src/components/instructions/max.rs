@@ -1,21 +1,19 @@
+use super::{ReduceCoordinate, ReduceFamily, ReduceInstruction};
+use crate::{components::instructions::ReduceRequirements, components::precision::ReducePrecision};
 use cubecl::prelude::*;
 
-use crate::{instructions::ReduceRequirements, precision::ReducePrecision};
-
-use super::{ReduceCoordinate, ReduceFamily, ReduceInstruction};
-
 // TODO Add to test framework.
-/// Return the item with the maximum absolute value.
+/// Return the item with the maximum value.
 #[derive(Debug, CubeType, Clone)]
-pub struct MaxAbs;
+pub struct Max;
 
-impl ReduceFamily for MaxAbs {
+impl ReduceFamily for Max {
     type Instruction<P: ReducePrecision> = Self;
     type Config = ();
 }
 
 #[cube]
-impl<P: ReducePrecision> ReduceInstruction<P> for MaxAbs {
+impl<P: ReducePrecision> ReduceInstruction<P> for Max {
     type AccumulatorItem = Line<P::EA>;
     type SharedAccumulator = SharedMemory<Line<P::EA>>;
     type Config = ();
@@ -25,15 +23,15 @@ impl<P: ReducePrecision> ReduceInstruction<P> for MaxAbs {
     }
 
     fn from_config(_config: Self::Config) -> Self {
-        MaxAbs {}
+        Max {}
     }
 
     fn null_input(_this: &Self, #[comptime] line_size: u32) -> Line<P::EI> {
-        Line::empty(line_size).fill(P::EI::from_int(0))
+        Line::empty(line_size).fill(P::EI::min_value())
     }
 
     fn null_accumulator(_this: &Self, #[comptime] line_size: u32) -> Self::AccumulatorItem {
-        Line::empty(line_size).fill(P::EA::from_int(0))
+        Line::empty(line_size).fill(P::EA::min_value())
     }
 
     fn assign_accumulator(
@@ -52,15 +50,15 @@ impl<P: ReducePrecision> ReduceInstruction<P> for MaxAbs {
         #[comptime] use_planes: bool,
     ) -> Self::AccumulatorItem {
         if use_planes {
-            let candidate_item = Line::cast_from(plane_max(Line::abs(item)));
+            let candidate_item = Line::cast_from(plane_max(item));
             select_many(
                 accumulator.greater_than(candidate_item),
                 *accumulator,
                 candidate_item,
             )
         } else {
-            let item_abs = Line::cast_from(Line::abs(item));
-            select_many(accumulator.greater_than(item_abs), *accumulator, item_abs)
+            let item = Line::cast_from(item);
+            select_many(accumulator.greater_than(item), *accumulator, item)
         }
     }
 
@@ -77,7 +75,7 @@ impl<P: ReducePrecision> ReduceInstruction<P> for MaxAbs {
         accumulator: Self::AccumulatorItem,
         _shape_axis_reduce: u32,
     ) -> Out {
-        let mut max = P::EA::from_int(0);
+        let mut max = P::EA::min_value();
         #[unroll]
         for k in 0..accumulator.size() {
             let candidate = accumulator[k];

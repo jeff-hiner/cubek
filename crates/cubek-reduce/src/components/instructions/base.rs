@@ -1,6 +1,5 @@
+use crate::components::precision::ReducePrecision;
 use cubecl::prelude::*;
-
-use crate::precision::ReducePrecision;
 
 pub trait ReduceFamily: Send + Sync + 'static + std::fmt::Debug {
     type Instruction<P: ReducePrecision>: ReduceInstruction<P, Config = Self::Config>;

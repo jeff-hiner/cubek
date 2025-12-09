@@ -1,8 +1,6 @@
-use cubecl::prelude::*;
-
-use crate::precision::ReducePrecision;
-
 use super::{ReduceCoordinate, ReduceFamily, ReduceInstruction, ReduceRequirements, Sum};
+use crate::components::precision::ReducePrecision;
+use cubecl::prelude::*;
 
 #[derive(Debug, CubeType, Clone)]
 pub struct Mean {

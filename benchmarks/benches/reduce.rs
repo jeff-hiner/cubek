@@ -4,10 +4,7 @@ use cubecl::{
     prelude::*,
     std::tensor::TensorHandle,
 };
-use cubek::{
-    random::random_uniform,
-    reduce::instructions::{ReduceFn, ReduceFnConfig},
-};
+use cubek::{random::random_uniform, reduce::components::instructions::ReduceOperationConfig};
 use std::marker::PhantomData;
 
 #[allow(dead_code)]
@@ -37,13 +34,13 @@ impl<R: Runtime, E: Float> Benchmark for ReduceBench<R, E> {
     }
 
     fn execute(&self, (input, out): Self::Input) -> Result<(), String> {
-        cubek::reduce::reduce::<R, ReduceFn>(
+        cubek::reduce::reduce::<R>(
             &self.client,
             input.as_ref(),
             out.as_ref(),
             self.axis,
             None,
-            ReduceFnConfig::Sum,
+            ReduceOperationConfig::Sum,
             cubek::reduce::ReduceDtypes {
                 input: E::as_type_native_unchecked(),
                 output: E::as_type_native_unchecked(),

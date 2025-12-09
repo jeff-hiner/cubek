@@ -1,8 +1,6 @@
-use cubecl::prelude::*;
-
-use crate::{instructions::ReduceRequirements, precision::ReducePrecision};
-
 use super::{ReduceCoordinate, ReduceFamily, ReduceInstruction};
+use crate::{components::instructions::ReduceRequirements, components::precision::ReducePrecision};
+use cubecl::prelude::*;
 
 // TODO Add to test framework.
 /// Return the item with the maximum absolute value.

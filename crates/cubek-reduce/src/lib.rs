@@ -12,32 +12,30 @@
 
 pub(crate) mod view;
 
-pub mod args;
-pub mod instructions;
-pub mod primitives;
+pub mod components;
 pub mod tune_key;
 
-mod config;
 mod error;
 mod launch;
-mod precision;
 mod shared_sum;
 mod strategy;
 
-pub use config::*;
+pub use components::config::*;
+pub use components::instructions::ReduceFamily;
+pub use components::instructions::ReduceInstruction;
+pub use components::precision::ReducePrecision;
 pub use error::*;
-pub use instructions::ReduceFamily;
-pub use instructions::ReduceInstruction;
-pub use precision::ReducePrecision;
 pub use shared_sum::*;
 pub use strategy::*;
 
 use launch::*;
 
-pub use args::init_tensors;
+pub use components::args::init_tensors;
 pub use launch::{ReduceDtypes, ReduceParams, reduce_kernel, reduce_kernel_virtual};
 
 use cubecl::prelude::*;
+
+use crate::components::instructions::ReduceOperationConfig;
 
 /// Reduce the given `axis` of the `input` tensor using the instruction `Inst` and write the result into `output`.
 ///
@@ -92,13 +90,13 @@ use cubecl::prelude::*;
 ///        println!("Output = {:?}", output_values); // Should print [1, 5].
 /// }
 /// ```
-pub fn reduce<R: Runtime, Inst: ReduceFamily>(
+pub fn reduce<R: Runtime>(
     client: &ComputeClient<R>,
     input: TensorHandleRef<R>,
     output: TensorHandleRef<R>,
     axis: usize,
     strategy: Option<ReduceStrategy>,
-    inst_config: Inst::Config,
+    inst_config: ReduceOperationConfig,
     dtypes: ReduceDtypes,
 ) -> Result<(), ReduceError> {
     validate_axis(input.shape.len(), axis)?;
@@ -115,7 +113,7 @@ pub fn reduce<R: Runtime, Inst: ReduceFamily>(
         }
     }
 
-    let result = launch_reduce::<R, Inst>(
+    let result = launch_reduce::<R>(
         client,
         input,
         output,

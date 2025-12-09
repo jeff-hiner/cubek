@@ -1,11 +1,10 @@
-use std::marker::PhantomData;
-
 use cubecl::prelude::*;
 use cubecl::std::{
     CubeOption, CubeOptionExpand,
     tensor::r#virtual::{VirtualTensor, VirtualTensorOperations, VirtualTensorOperationsExpand},
 };
 use cubecl::unexpanded;
+use std::marker::PhantomData;
 
 pub trait ReduceDType {
     type In: Numeric;

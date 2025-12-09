@@ -1,14 +1,16 @@
+use crate::{
+    LineMode, ReduceConfig, ReduceStrategy,
+    components::{
+        args::{ReduceArgs, TensorArgs, init_tensors},
+        config::BoundChecksInner,
+        instructions::*,
+        level::{self},
+        precision::ReducePrecision,
+        range::ReduceRange,
+    },
+};
 use cubecl::prelude::*;
 use cubecl::std::tensor::r#virtual::VirtualTensor;
-
-use crate::BoundChecksInner;
-use crate::args::ReduceArgs;
-use crate::args::TensorArgs;
-use crate::args::init_tensors;
-use crate::instructions::*;
-use crate::precision::ReducePrecision;
-use crate::primitives::*;
-use crate::{LineMode, ReduceConfig, ReduceStrategy};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReduceDtypes {
@@ -21,7 +23,7 @@ pub struct ReduceDtypes {
 /// See the main entrypoint `reduce` in `lib.rs` for an example how to call this function
 /// with the appropriate assumptions.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn launch_reduce<Run: Runtime, Rd: ReduceFamily>(
+pub(crate) fn launch_reduce<Run: Runtime>(
     client: &ComputeClient<Run>,
     input: TensorHandleRef<Run>,
     output: TensorHandleRef<Run>,
@@ -29,7 +31,7 @@ pub(crate) fn launch_reduce<Run: Runtime, Rd: ReduceFamily>(
     config: ReduceConfig,
     strategy: ReduceStrategy,
     dtypes: ReduceDtypes,
-    inst: Rd::Config,
+    inst: ReduceOperationConfig,
 ) -> Result<(), LaunchError> {
     let settings = ReduceParams {
         shared: strategy.shared.then(|| {
@@ -47,7 +49,7 @@ pub(crate) fn launch_reduce<Run: Runtime, Rd: ReduceFamily>(
         bound_checks_inner: config.bound_checks_inner,
     };
     unsafe {
-        reduce_kernel::launch_unchecked::<Rd, TensorArgs, Run>(
+        reduce_kernel::launch_unchecked::<TensorArgs, Run>(
             client,
             config.cube_count,
             config.cube_dim,
@@ -75,27 +77,27 @@ pub struct ReduceParams {
 }
 
 #[cube(launch_unchecked)]
-pub fn reduce_kernel<In: Numeric, Out: Numeric, Acc: Numeric, R: ReduceFamily, RA: ReduceArgs>(
+pub fn reduce_kernel<In: Numeric, Out: Numeric, Acc: Numeric, RA: ReduceArgs>(
     input: &RA::Input<In>,
     output: &mut RA::Output<Out>,
     axis_reduce: u32,
     #[comptime] params: ReduceParams,
-    #[comptime] config: R::Config,
+    #[comptime] config: ReduceOperationConfig,
     #[define(In)] _input_dtype: StorageType,
     #[define(Out)] _output_dtype: StorageType,
     #[define(Acc)] _acc_dtype: StorageType,
 ) {
     let (input, mut output) = init_tensors::<RA, In, Out>(input, output);
-    reduce_kernel_virtual::<In, Out, Acc, R>(&input, &mut output, axis_reduce, params, config);
+    reduce_kernel_virtual::<In, Out, Acc>(&input, &mut output, axis_reduce, params, config);
 }
 
 #[cube]
-pub fn reduce_kernel_virtual<In: Numeric, Out: Numeric, Acc: Numeric, R: ReduceFamily>(
+pub fn reduce_kernel_virtual<In: Numeric, Out: Numeric, Acc: Numeric>(
     input: &VirtualTensor<In>,
     output: &mut VirtualTensor<Out, ReadWrite>,
     axis_reduce: u32,
     #[comptime] params: ReduceParams,
-    #[comptime] config: R::Config,
+    #[comptime] config: ReduceOperationConfig,
 ) {
     let reduce_index = get_reduce_index(params);
 
@@ -106,7 +108,7 @@ pub fn reduce_kernel_virtual<In: Numeric, Out: Numeric, Acc: Numeric, R: ReduceF
         }
     }
 
-    reduce_kernel_inner::<(In, Acc), Out, R>(
+    reduce_kernel_inner::<(In, Acc), Out, ReduceOperation>(
         input,
         output,
         axis_reduce,
@@ -130,7 +132,7 @@ fn reduce_kernel_inner<P: ReducePrecision, Out: Numeric, R: ReduceFamily>(
     let inst = &R::Instruction::<P>::from_config(config);
     let accumulator = match comptime!((params.shared, params.use_planes)) {
         (Some(accumulator_size), use_planes) => {
-            let mut accumulator = reduce_slice_shared::<P, VirtualTensor<P::EI>, R::Instruction<P>>(
+            level::cube::reduce::<P, VirtualTensor<P::EI>, R::Instruction<P>>(
                 input,
                 inst,
                 range,
@@ -139,11 +141,9 @@ fn reduce_kernel_inner<P: ReducePrecision, Out: Numeric, R: ReduceFamily>(
                 params.line_mode,
                 use_planes,
                 params.bound_checks_inner,
-            );
-            sync_cube();
-            reduce_tree::<P, R::Instruction<P>>(inst, &mut accumulator, accumulator_size)
+            )
         }
-        (None, true) => reduce_slice_plane::<P, VirtualTensor<P::EI>, R::Instruction<P>>(
+        (None, true) => level::plane::reduce::<P, VirtualTensor<P::EI>, R::Instruction<P>>(
             input,
             inst,
             range,
@@ -151,7 +151,7 @@ fn reduce_kernel_inner<P: ReducePrecision, Out: Numeric, R: ReduceFamily>(
             params.line_mode,
             params.bound_checks_inner,
         ),
-        (None, false) => reduce_slice::<P, VirtualTensor<P::EI>, R::Instruction<P>>(
+        (None, false) => level::unit::reduce::<P, VirtualTensor<P::EI>, R::Instruction<P>>(
             input,
             range,
             inst,

@@ -1,8 +1,7 @@
 use cubecl::TestRuntime;
 use cubecl::prelude::*;
-use cubek_reduce::{
-    ReduceDtypes, ReduceError, ReducePrecision, ReduceStrategy, instructions::*, reduce,
-};
+use cubek_reduce::components::instructions::ReduceOperationConfig;
+use cubek_reduce::{ReduceDtypes, ReduceError, ReducePrecision, ReduceStrategy, reduce};
 use rand::{
     SeedableRng,
     distr::{Distribution, Uniform},
@@ -65,7 +64,7 @@ impl TestCase {
             Some(axis) if self.stride[axis] == 0 => vec![0; input_values.len()],
             _ => self.cpu_argmax(&input_values),
         };
-        self.run_reduce_test::<u32, ArgMax>(input_values, expected_values)
+        self.run_reduce_test::<u32>(input_values, expected_values, ReduceOperationConfig::ArgMax)
     }
 
     fn cpu_argmax<F: Float>(&self, values: &[F]) -> Vec<u32> {
@@ -88,7 +87,7 @@ impl TestCase {
             Some(axis) if self.stride[axis] == 0 => vec![0; input_values.len()],
             _ => self.cpu_argmin(&input_values),
         };
-        self.run_reduce_test::<u32, ArgMin>(input_values, expected_values)
+        self.run_reduce_test::<u32>(input_values, expected_values, ReduceOperationConfig::ArgMin)
     }
 
     fn cpu_argmin<F: Float>(&self, values: &[F]) -> Vec<u32> {
@@ -111,7 +110,7 @@ impl TestCase {
             Some(axis) if self.stride[axis] == 0 => input_values.clone(),
             _ => self.cpu_mean(&input_values),
         };
-        self.run_reduce_test::<EI, Mean>(input_values, expected_values)
+        self.run_reduce_test::<EI>(input_values, expected_values, ReduceOperationConfig::Mean)
     }
 
     fn cpu_mean<F: Float>(&self, values: &[F]) -> Vec<F> {
@@ -130,7 +129,7 @@ impl TestCase {
                 .collect(),
             _ => self.cpu_prod(&input_values),
         };
-        self.run_reduce_test::<EI, Prod>(input_values, expected_values)
+        self.run_reduce_test::<EI>(input_values, expected_values, ReduceOperationConfig::Prod)
     }
 
     fn powf<F: Float>(base: F, power: usize) -> F {
@@ -161,7 +160,7 @@ impl TestCase {
                 .collect(),
             _ => self.cpu_sum(&input_values),
         };
-        self.run_reduce_test::<EI, Sum>(input_values, expected_values)
+        self.run_reduce_test::<EI>(input_values, expected_values, ReduceOperationConfig::Sum)
     }
 
     fn cpu_sum<F: Float>(&self, values: &[F]) -> Vec<F> {
@@ -175,13 +174,13 @@ impl TestCase {
         expected
     }
 
-    pub fn run_reduce_test<O, K>(
+    pub fn run_reduce_test<O>(
         &self,
         input_values: Vec<<TestDType as ReducePrecision>::EI>,
         expected_values: Vec<O>,
+        config: ReduceOperationConfig,
     ) where
         O: Numeric + CubeElement + std::fmt::Display,
-        K: ReduceFamily<Config = ()>,
     {
         let client = TestRuntime::client(&Default::default());
 
@@ -214,13 +213,13 @@ impl TestCase {
             )
         };
 
-        let result = reduce::<TestRuntime, K>(
+        let result = reduce::<TestRuntime>(
             &client,
             input,
             output,
             self.axis.unwrap(),
             self.strategy,
-            (),
+            config,
             ReduceDtypes {
                 input: <TestDType as ReducePrecision>::EI::as_type_native_unchecked(),
                 output: O::as_type_native_unchecked(),
