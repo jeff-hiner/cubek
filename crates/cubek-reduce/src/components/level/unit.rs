@@ -1,8 +1,8 @@
 use crate::{
     LineMode,
     components::{
-        instructions::*, level::fill_coordinate_line, precision::ReducePrecision,
-        range::ReduceRange,
+        instructions::*, level::fill_coordinate_line, partition::ReducePartition,
+        precision::ReducePrecision,
     },
 };
 use cubecl::prelude::*;
@@ -18,18 +18,18 @@ use cubecl::prelude::*;
 #[cube]
 pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>(
     items: &I,
-    range: ReduceRange,
+    partition: ReducePartition,
     inst: &R,
     #[comptime] line_size: u32,
     #[comptime] line_mode: LineMode,
 ) -> R::AccumulatorItem {
     let mut accumulator = R::null_accumulator(inst, line_size);
 
-    let mut index = range.index_start;
+    let mut index = partition.index_start;
     for coordinate in range_stepped(
-        range.coordinate_start,
-        range.coordinate_end,
-        range.coordinate_step,
+        partition.coordinate_start,
+        partition.coordinate_end,
+        partition.coordinate_step,
     ) {
         let requirements = R::requirements(inst);
         let coordinates = if comptime![requirements.coordinates] {
@@ -44,7 +44,7 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
             coordinates,
             false,
         );
-        index += range.index_step;
+        index += partition.index_step;
     }
 
     accumulator

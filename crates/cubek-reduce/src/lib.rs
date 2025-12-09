@@ -13,6 +13,7 @@
 pub(crate) mod view;
 
 pub mod components;
+pub mod routines;
 pub mod tune_key;
 
 mod error;
@@ -31,7 +32,7 @@ pub use strategy::*;
 use launch::*;
 
 pub use components::args::init_tensors;
-pub use launch::{ReduceDtypes, ReduceParams, reduce_kernel, reduce_kernel_virtual};
+pub use launch::{ReduceDtypes, ReduceParams, reduce_kernel};
 
 use cubecl::prelude::*;
 

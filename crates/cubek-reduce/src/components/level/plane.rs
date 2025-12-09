@@ -1,8 +1,8 @@
 use crate::{
     BoundChecksInner, LineMode,
     components::{
-        instructions::*, level::fill_coordinate_line, precision::ReducePrecision,
-        range::ReduceRange,
+        instructions::*, level::fill_coordinate_line, partition::ReducePartition,
+        precision::ReducePrecision,
     },
 };
 use cubecl::prelude::*;
@@ -23,7 +23,7 @@ use cubecl::prelude::*;
 pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>(
     items: &I,
     inst: &R,
-    range: ReduceRange,
+    partition: ReducePartition,
     #[comptime] line_size: u32,
     #[comptime] line_mode: LineMode,
     #[comptime] bound_checks: BoundChecksInner,
@@ -32,11 +32,11 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
 
     let mut accumulator = R::null_accumulator(inst, line_size);
 
-    let mut first_index = range.index_start;
+    let mut first_index = partition.index_start;
     for first_coordinate in range_stepped(
-        range.coordinate_start,
-        range.coordinate_end,
-        range.coordinate_step,
+        partition.coordinate_start,
+        partition.coordinate_end,
+        partition.coordinate_step,
     ) {
         let unit_coordinate_offset = match line_mode {
             LineMode::Parallel => UNIT_POS_X * line_size,
@@ -55,16 +55,16 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
             ReduceCoordinate::new_NotRequired()
         };
 
-        let index = first_index + UNIT_POS_X * range.index_step;
+        let index = first_index + UNIT_POS_X * partition.index_step;
         let item = match bound_checks {
             BoundChecksInner::None => items.read(index),
             BoundChecksInner::Mask => {
-                let mask = unit_coordinate < range.coordinate_end;
+                let mask = unit_coordinate < partition.coordinate_end;
                 let index = index * u32::cast_from(mask);
                 select(mask, items.read(index), R::null_input(inst, line_size))
             }
             BoundChecksInner::Branch => {
-                if unit_coordinate < range.coordinate_end {
+                if unit_coordinate < partition.coordinate_end {
                     items.read(index)
                 } else {
                     R::null_input(inst, line_size)
@@ -74,7 +74,7 @@ pub fn reduce<P: ReducePrecision, I: List<Line<P::EI>>, R: ReduceInstruction<P>>
 
         reduce_inplace::<P, R>(inst, &mut accumulator, item, coordinates, true);
 
-        first_index += plane_dim * range.index_step;
+        first_index += plane_dim * partition.index_step;
     }
     accumulator
 }
