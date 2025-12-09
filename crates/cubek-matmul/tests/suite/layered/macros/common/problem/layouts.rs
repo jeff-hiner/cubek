@@ -1,7 +1,3 @@
-// #[macro_export]
-// macro_rules! testgen_matmul_layouts {
-//     ($kind: ident, $algorithm: ty, $precision: ty, $selection: expr) => {
-
 #[cfg(all(
     not(feature = "matmul_tests_layouts"),
     not(feature = "matmul_tests_vecmat")
@@ -16,13 +12,6 @@ pub mod default {
 
     include!("problem_size.rs");
 }
-// $crate::testgen_matmul_problem_size!(
-//     $kind,
-//     $algorithm,
-//     $precision,
-//     $selection,
-//     (MatrixLayout::RowMajor, MatrixLayout::RowMajor)
-// );
 
 #[cfg(all(not(feature = "matmul_tests_layouts"), feature = "matmul_tests_vecmat"))]
 pub mod default {
@@ -36,56 +25,46 @@ pub mod default {
     include!("problem_size.rs");
 }
 
-// #[cfg(feature = "matmul_tests_layouts")]
-// mod rr {
-//     use super::*;
+#[cfg(feature = "matmul_tests_layouts")]
+mod rr {
+    use super::*;
 
-//     $crate::testgen_matmul_problem_size!(
-//         $kind,
-//         $algorithm,
-//         $precision,
-//         $selection,
-//         (MatrixLayout::RowMajor, MatrixLayout::RowMajor)
-//     );
-// }
+    pub fn layouts() -> (MatrixLayout, MatrixLayout) {
+        (MatrixLayout::RowMajor, MatrixLayout::RowMajor)
+    }
 
-// #[cfg(feature = "matmul_tests_layouts")]
-// mod rc {
-//     use super::*;
+    include!("problem_size.rs");
+}
 
-//     $crate::testgen_matmul_problem_size!(
-//         $kind,
-//         $algorithm,
-//         $precision,
-//         $selection,
-//         (MatrixLayout::RowMajor, MatrixLayout::ColMajor)
-//     );
-// }
+#[cfg(feature = "matmul_tests_layouts")]
+mod rc {
+    use super::*;
 
-// #[cfg(feature = "matmul_tests_layouts")]
-// mod cr {
-//     use super::*;
+    pub fn layouts() -> (MatrixLayout, MatrixLayout) {
+        (MatrixLayout::RowMajor, MatrixLayout::ColMajor)
+    }
 
-//     $crate::testgen_matmul_problem_size!(
-//         $kind,
-//         $algorithm,
-//         $precision,
-//         $selection,
-//         (MatrixLayout::ColMajor, MatrixLayout::RowMajor)
-//     );
-// }
+    include!("problem_size.rs");
+}
 
-// #[cfg(feature = "matmul_tests_layouts")]
-// mod cc {
-//     use super::*;
+#[cfg(feature = "matmul_tests_layouts")]
+mod cr {
+    use super::*;
 
-//     $crate::testgen_matmul_problem_size!(
-//         $kind,
-//         $algorithm,
-//         $precision,
-//         $selection,
-//         (MatrixLayout::ColMajor, MatrixLayout::ColMajor)
-//     );
-// }
-//     };
-// }
+    pub fn layouts() -> (MatrixLayout, MatrixLayout) {
+        (MatrixLayout::ColMajor, MatrixLayout::RowMajor)
+    }
+
+    include!("problem_size.rs");
+}
+
+#[cfg(feature = "matmul_tests_layouts")]
+mod cc {
+    use super::*;
+
+    pub fn layouts() -> (MatrixLayout, MatrixLayout) {
+        (MatrixLayout::ColMajor, MatrixLayout::ColMajor)
+    }
+
+    include!("problem_size.rs");
+}

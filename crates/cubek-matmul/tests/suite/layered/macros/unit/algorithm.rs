@@ -1,21 +1,15 @@
-#[macro_export]
-macro_rules! testgen_matmul_unit_algorithm {
-    () => {
-        use cubek_matmul::kernels::layered::double_unit::DoubleUnitAlgorithm;
-        use cubek_matmul::kernels::layered::simple_unit::SimpleUnitAlgorithm;
+#[cfg(feature = "matmul_tests_simple")]
+mod simple {
+    use super::*;
+    type Algorithm = cubek_matmul::kernels::layered::simple_unit::SimpleUnitAlgorithm;
 
-        #[cfg(feature = "matmul_tests_simple")]
-        mod simple {
-            use super::*;
+    include!("precision.rs");
+}
 
-            $crate::testgen_matmul_unit_precision!(SimpleUnitAlgorithm);
-        }
+#[cfg(feature = "matmul_tests_double")]
+mod double_buffering {
+    use super::*;
+    type Algorithm = cubek_matmul::kernels::layered::double_unit::DoubleUnitAlgorithm;
 
-        #[cfg(feature = "matmul_tests_double")]
-        mod double_buffering {
-            use super::*;
-
-            $crate::testgen_matmul_unit_precision!(DoubleUnitAlgorithm);
-        }
-    };
+    include!("precision.rs");
 }

@@ -1,5 +1,3 @@
-use cubek_matmul::components::PartitionSize;
-
 mod p1x1x1 {
     use super::*;
     use cubek_matmul::components::{PartitionSize, TilingSchemeBuilder};

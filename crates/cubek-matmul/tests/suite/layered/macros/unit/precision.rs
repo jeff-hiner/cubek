@@ -1,18 +1,21 @@
-#[macro_export]
-macro_rules! testgen_matmul_unit_precision {
-    ($algorithm: ty) => {
-        #[cfg(feature = "matmul_tests_f16")]
-        mod f16_ty {
-            use super::*;
+#[cfg(feature = "matmul_tests_f16")]
+mod f16_ty {
+    use super::*;
 
-            $crate::testgen_matmul_unit_tiling_scheme!($algorithm, (half::f16, half::f16));
-        }
+    pub type TestEG = half::f16;
+    pub type TestES = half::f16;
+    pub type TestEA = half::f16;
 
-        #[cfg(feature = "matmul_tests_f32")]
-        mod f32_ty {
-            use super::*;
+    include!("tiling_scheme/tile.rs");
+}
 
-            $crate::testgen_matmul_unit_tiling_scheme!($algorithm, (f32, f32));
-        }
-    };
+#[cfg(feature = "matmul_tests_f32")]
+mod f32_ty {
+    use super::*;
+
+    pub type TestEG = f32;
+    pub type TestES = f32;
+    pub type TestEA = f32;
+
+    include!("tiling_scheme/tile.rs");
 }

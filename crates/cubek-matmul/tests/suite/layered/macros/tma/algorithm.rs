@@ -1,27 +1,24 @@
-#[macro_export]
-macro_rules! testgen_matmul_tma_algorithm {
-    () => {
-        mod simple_tma {
-            use super::*;
-            use cubek_matmul::kernels::layered::simple::SimpleTmaAlgorithm;
+#[cfg(feature = "matmul_tests_simple")]
+mod simple_tma {
+    use super::*;
+    type Algorithm = cubek_matmul::kernels::layered::simple::SimpleTmaAlgorithm<TMM>;
 
-            $crate::testgen_matmul_tma_precision!(SimpleTmaAlgorithm<TMM>);
-        }
+    include!("precision.rs");
+}
 
-        #[cfg(all(feature = "matmul_tests_double"))]
-        mod double_buffering_tma {
-            use super::*;
-            use cubek_matmul::kernels::layered::double_buffering::TmaDoubleBufferingAlgorithm;
+#[cfg(feature = "matmul_tests_double")]
+mod double_buffering_tma {
+    use super::*;
+    type Algorithm =
+        cubek_matmul::kernels::layered::double_buffering::TmaDoubleBufferingAlgorithm<TMM>;
 
-            $crate::testgen_matmul_tma_precision!(TmaDoubleBufferingAlgorithm<TMM>);
-        }
+    include!("precision.rs");
+}
 
-        #[cfg(all(feature = "matmul_tests_double"))]
-        mod specialized_tma {
-            use super::*;
-            use cubek_matmul::kernels::layered::specialized::SpecializedAlgorithm;
+#[cfg(feature = "matmul_tests_double")]
+mod specialized_tma {
+    use super::*;
+    type Algorithm = cubek_matmul::kernels::layered::specialized::SpecializedAlgorithm<TMM>;
 
-            $crate::testgen_matmul_tma_precision!(SpecializedAlgorithm<TMM>);
-        }
-    };
+    include!("precision.rs");
 }

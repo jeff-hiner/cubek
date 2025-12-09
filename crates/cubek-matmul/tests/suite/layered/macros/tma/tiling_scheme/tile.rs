@@ -1,31 +1,26 @@
-#[macro_export]
-macro_rules! testgen_matmul_tma_tile {
-    ($algorithm: ty, $precision: ty, $tiling_scheme_builder: expr) => {
-        use cubek_matmul::components::TileSize;
+mod t16x16x16 {
+    use super::*;
+    use cubek_matmul::components::{TileSize, TilingScheme, TilingSchemeBuilder};
 
-        mod t16x16x16 {
-            use super::*;
+    fn tile_size(builder: TilingSchemeBuilder) -> TilingSchemeBuilder {
+        builder.with_tile_size(TileSize {
+            m: 16,
+            n: 16,
+            k: 16,
+        })
+    }
 
-            $crate::testgen_matmul_tma_partition!(
-                $algorithm,
-                $precision,
-                $tiling_scheme_builder.with_tile_size(TileSize {
-                    m: 16,
-                    n: 16,
-                    k: 16
-                })
-            );
-        }
+    include!("partition.rs");
+}
 
-        #[cfg(feature = "matmul_tests_mma")]
-        mod t16x8x16 {
-            use super::*;
+#[cfg(feature = "matmul_tests_mma")]
+mod t16x8x16 {
+    use super::*;
+    use cubek_matmul::components::{TileSize, TilingScheme, TilingSchemeBuilder};
 
-            $crate::testgen_matmul_tma_partition!(
-                $algorithm,
-                $precision,
-                $tiling_scheme_builder.with_tile_size(TileSize { m: 16, n: 8, k: 16 })
-            );
-        }
-    };
+    fn tile_size(builder: TilingSchemeBuilder) -> TilingSchemeBuilder {
+        builder.with_tile_size(TileSize { m: 16, n: 8, k: 16 })
+    }
+
+    include!("partition.rs");
 }
