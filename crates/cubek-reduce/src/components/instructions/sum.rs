@@ -46,7 +46,7 @@ impl<P: ReducePrecision> ReduceInstruction<P> for Sum {
         _coordinate: ReduceCoordinate,
         #[comptime] use_planes: bool,
     ) -> Self::AccumulatorItem {
-        if use_planes {
+        if comptime!(use_planes) {
             *accumulator + plane_sum(Line::cast_from(item))
         } else {
             *accumulator + Line::cast_from(item)

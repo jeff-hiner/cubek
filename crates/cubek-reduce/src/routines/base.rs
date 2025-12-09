@@ -82,7 +82,7 @@ fn reduce_kernel_inner<P: ReducePrecision, Out: Numeric, R: ReduceFamily>(
         ReduceBlueprintKind::Unit => {
             let config = comptime!(UnitReduceConfig::new(input_line_size, blueprint.line_mode));
 
-            level::unit::reduce::<P, VirtualTensor<P::EI>, R::Instruction<P>>(
+            level::unit::reduce_unit::<P, VirtualTensor<P::EI>, R::Instruction<P>>(
                 input, partition, inst, config,
             )
         }
@@ -102,7 +102,7 @@ fn reduce_kernel_inner<P: ReducePrecision, Out: Numeric, R: ReduceFamily>(
 #[cube]
 fn get_reduce_index(#[comptime] params: ReduceBlueprintKind) -> u32 {
     match params {
-        ReduceBlueprintKind::Unit => ABSOLUTE_POS,
+        ReduceBlueprintKind::Unit { .. } => ABSOLUTE_POS,
         ReduceBlueprintKind::Plane { .. } => CUBE_POS * CUBE_DIM_Y + UNIT_POS_Y,
         ReduceBlueprintKind::Cube { .. } => CUBE_POS,
     }

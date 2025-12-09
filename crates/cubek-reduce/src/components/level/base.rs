@@ -1,4 +1,7 @@
-use crate::LineMode;
+use crate::{
+    LineMode,
+    components::instructions::{ReduceCoordinate, ReduceRequirements},
+};
 use cubecl::prelude::*;
 
 // If line mode is parallel, fill a line with `x, x+1, ... x+ line_size - 1` where `x = first`.
@@ -19,5 +22,21 @@ pub(crate) fn fill_coordinate_line(
             coordinates
         }
         LineMode::Perpendicular => Line::empty(line_size).fill(first),
+    }
+}
+
+#[cube]
+impl ReduceCoordinate {
+    pub fn new(
+        coordinate: u32,
+        requirements: ReduceRequirements,
+        #[comptime] line_size: u32,
+        #[comptime] line_mode: LineMode,
+    ) -> Self {
+        if comptime![requirements.coordinates] {
+            ReduceCoordinate::new_Required(fill_coordinate_line(coordinate, line_size, line_mode))
+        } else {
+            ReduceCoordinate::new_NotRequired()
+        }
     }
 }
