@@ -14,23 +14,13 @@ version.workspace = true
 default = ["std", "cubecl/default"]
 std = ["cubecl/std"]
 
-attention_tests_f16 = []
-attention_tests_f32 = []
-attention_tests_unit = []
-attention_tests_blackbox_accelerated = []
-attention_tests_base = ["attention_tests_f16", "attention_tests_unit"]
-attention_tests_all = [
-    "attention_tests_f16",
-    "attention_tests_f32",
-    "attention_tests_unit",
-    "attention_tests_blackbox_accelerated",
-]
 
 [dependencies]
 cubek-matmul = { path = "../cubek-matmul", version = "0.0.1", default-features = false }
 cubek-random = { path = "../cubek-random", version = "=0.0.1", default-features = false }
 cubecl = { workspace = true, features = ["stdlib"] }
 cubecl-common = { workspace = true }
+cubek-std = { path = "../cubek-std", version = "=0.0.1", default-features = false }
 
 bytemuck = { workspace = true }
 half = { workspace = true, features = ["bytemuck"] }

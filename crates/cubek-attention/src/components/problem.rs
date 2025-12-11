@@ -110,6 +110,18 @@ pub struct AttentionStorageTypes {
     pub out: StorageType,
 }
 
+impl AttentionStorageTypes {
+    pub fn from_single_dtype(dtype: StorageType) -> AttentionStorageTypes {
+        Self {
+            query: dtype,
+            key: dtype,
+            value: dtype,
+            mask: dtype,
+            out: dtype,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum AccumulatorPrecision {
     Strict(StorageType),

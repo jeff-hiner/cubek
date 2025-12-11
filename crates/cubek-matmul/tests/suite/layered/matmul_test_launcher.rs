@@ -48,21 +48,21 @@ pub fn test_matmul_algorithm<A: Algorithm>(
         &client,
         *dtypes.lhs_global,
         1234,
-        compute_strides(
+        &compute_strides(
             &lhs_shape,
             matches!(problem.lhs_layout, MatrixLayout::ColMajor),
         ),
-        lhs_shape,
+        &lhs_shape,
     );
     let (rhs, rhs_data) = random_tensor(
         &client,
         *dtypes.rhs_global,
         5678,
-        compute_strides(
+        &compute_strides(
             &rhs_shape,
             matches!(problem.rhs_layout, MatrixLayout::ColMajor),
         ),
-        rhs_shape,
+        &rhs_shape,
     );
     let out = TensorHandle::zeros(&client, problem.shape(MatmulIdent::Out), *dtypes.acc_global);
 

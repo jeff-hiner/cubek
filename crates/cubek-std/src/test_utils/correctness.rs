@@ -1,5 +1,6 @@
 use crate::test_utils::test_tensor::new_casted;
 use cubecl::CubeElement;
+use cubecl::frontend::CubePrimitive;
 use cubecl::{TestRuntime, client::ComputeClient, std::tensor::TensorHandle};
 
 /// Compares the content of a handle to a given slice of f32.
@@ -17,7 +18,7 @@ pub fn assert_equals_approx(
     };
 
     // Obtain the data in f32 for not being generic over type
-    let data_handle = new_casted(client, out);
+    let data_handle = new_casted(client, out, f32::as_type_native_unchecked());
     let data_f32 =
         f32::from_bytes(&client.read_one_tensor(data_handle.as_copy_descriptor())).to_owned();
 

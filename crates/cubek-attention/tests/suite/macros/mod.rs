@@ -49,7 +49,6 @@ pub mod tiling_scheme_ops {
     }
 }
 
-#[cfg(feature = "attention_tests_unit")]
 mod attention_unit {
     type Algorithm = cubek_attention::kernels::unit::UnitAlgorithm;
     const TILE_SIZE: cubek_attention::components::AttentionTileSize =
@@ -62,24 +61,29 @@ mod attention_unit {
 
     const STAGE_Q_BASE: u32 = 32;
 
-    #[cfg(feature = "attention_tests_f16")]
     mod f16_ty {
         use super::*;
-        type TestDType = (half::f16, half::f16);
+        use cubecl::frontend::CubePrimitive;
+
+        fn global_dtypes() -> AttentionStorageTypes {
+            AttentionStorageTypes::from_single_dtype(half::f16::as_type_native_unchecked())
+        }
 
         include!("suite.rs");
     }
 
-    #[cfg(feature = "attention_tests_f32")]
     mod f32_ty {
         use super::*;
-        type TestDType = (f32, f32);
+        use cubecl::frontend::CubePrimitive;
+
+        fn global_dtypes() -> AttentionStorageTypes {
+            AttentionStorageTypes::from_single_dtype(f32::as_type_native_unchecked())
+        }
 
         include!("suite.rs");
     }
 }
 
-#[cfg(feature = "attention_tests_blackbox_accelerated")]
 mod attention_blackbox_accelerated {
     type Algorithm = cubek_attention::kernels::blackbox_accelerated::BlackboxAcceleratedAlgorithm;
     #[cfg(target_os = "macos")]
@@ -101,18 +105,24 @@ mod attention_blackbox_accelerated {
 
     const STAGE_Q_BASE: u32 = 1;
 
-    #[cfg(feature = "attention_tests_f16")]
     mod f16_ty {
         use super::*;
-        type TestDType = (half::f16, half::f16);
+        use cubecl::frontend::CubePrimitive;
+
+        fn global_dtypes() -> AttentionStorageTypes {
+            AttentionStorageTypes::from_single_dtype(half::f16::as_type_native_unchecked())
+        }
 
         include!("suite.rs");
     }
 
-    #[cfg(feature = "attention_tests_f32")]
     mod f32_ty {
         use super::*;
-        type TestDType = (f32, f32);
+        use cubecl::frontend::CubePrimitive;
+
+        fn global_dtypes() -> AttentionStorageTypes {
+            AttentionStorageTypes::from_single_dtype(f32::as_type_native_unchecked())
+        }
 
         include!("suite.rs");
     }

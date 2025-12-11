@@ -119,21 +119,21 @@ fn test_naive(case: MatmulTestCase) {
         &client,
         *dtype,
         1234,
-        compute_strides(
+        &compute_strides(
             &lhs_shape,
             matches!(problem.lhs_layout, MatrixLayout::ColMajor),
         ),
-        lhs_shape,
+        &lhs_shape,
     );
     let (rhs, rhs_data) = random_tensor(
         &client,
         *dtype,
         5678,
-        compute_strides(
+        &compute_strides(
             &rhs_shape,
             matches!(problem.rhs_layout, MatrixLayout::ColMajor),
         ),
-        rhs_shape,
+        &rhs_shape,
     );
 
     let out = TensorHandle::zeros(&client, problem.shape(MatmulIdent::Out), *dtype);

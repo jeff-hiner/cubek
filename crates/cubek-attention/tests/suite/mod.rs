@@ -1,6 +1,6 @@
 pub mod attention_test_launcher;
 pub mod macros;
 
-mod test_utils;
+mod cpu_reference;
 
-pub use test_utils::TestPrecision;
+pub use cpu_reference::assert_result;

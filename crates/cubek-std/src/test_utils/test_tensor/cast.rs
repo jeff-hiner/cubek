@@ -1,6 +1,5 @@
 use cubecl::{
     TestRuntime,
-    ir::{ElemType, FloatKind},
     prelude::*,
     std::tensor::{
         TensorHandle, ViewOperations, ViewOperationsExpand, ViewOperationsMut,
@@ -29,12 +28,12 @@ fn cast_inner<From: Numeric, To: Numeric>(from: &Tensor<Line<From>>, to: &mut Te
 pub fn new_casted(
     client: &ComputeClient<TestRuntime>,
     original: &TensorHandle<TestRuntime>,
+    target_type: StorageType,
 ) -> TensorHandle<TestRuntime> {
-    if original.dtype == StorageType::Scalar(ElemType::Float(FloatKind::F32)) {
+    if original.dtype == target_type {
         return original.clone();
     }
 
-    let out_dtype = f32::as_type_native_unchecked();
     let num_elems: usize = original.shape.iter().product();
 
     let line_size = tensor_line_size_parallel(
@@ -50,8 +49,8 @@ pub fn new_casted(
 
     let out = TensorHandle::new_contiguous(
         original.shape.clone(),
-        client.empty(out_dtype.size() * num_elems),
-        out_dtype,
+        client.empty(target_type.size() * num_elems),
+        target_type,
     );
 
     cast_launch::launch::<TestRuntime>(
@@ -60,7 +59,7 @@ pub fn new_casted(
         cube_dim,
         original.as_arg(line_size),
         out.as_arg(line_size),
-        [original.dtype, out_dtype],
+        [original.dtype, target_type],
     )
     .unwrap();
 
