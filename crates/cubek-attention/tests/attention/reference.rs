@@ -6,6 +6,7 @@ use cubecl::{TestRuntime, client::ComputeClient, std::tensor::TensorHandle};
 
 use cubek_test_utils::{HostData, HostDataType, HostDataVec, StrideSpec, assert_equals_approx};
 
+#[allow(clippy::too_many_arguments)]
 pub fn assert_result(
     query: &HostData,
     key: &HostData,

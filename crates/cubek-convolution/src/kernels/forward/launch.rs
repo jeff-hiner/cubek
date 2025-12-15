@@ -1,11 +1,13 @@
-use crate::{components::ConvGemmConfig as _, kernels::layered::simple::*};
-use crate::{components::ConvSetupError, kernels::layered::selector::launch_kernel_concrete};
 use crate::{
-    components::{
-        ConvolutionProblem, Dimensionality,
-        global::args::{ConcreteInputsFactory, ConcreteOutputFactory},
-    },
-    kernels::layered::algorithm::Algorithm,
+    ConvolutionArgs, Strategy,
+    components::{ConvGemmConfig as _, ConvolutionOperation},
+    forward::args::ConcreteArgs,
+    kernels::forward::simple::*,
+};
+use crate::{components::ConvSetupError, kernels::forward::selector::launch_kernel_concrete};
+use crate::{
+    components::{ConvolutionProblem, Dimensionality},
+    kernels::forward::algorithm::Algorithm,
 };
 use cubecl::{
     Runtime,
@@ -13,6 +15,7 @@ use cubecl::{
     prelude::*,
     std::{CubeOption, tensor::TensorHandle},
 };
+use cubek_matmul::MatmulInputHandleRef;
 use cubek_matmul::{
     AcceleratedTileKind, MatmulInputHandle, ReadingStrategy,
     components::{
@@ -20,25 +23,7 @@ use cubek_matmul::{
         tile::{cmma::CmmaMatmul, io::Strided, mma::MmaMatmul},
     },
 };
-use cubek_matmul::{
-    MatmulInputHandleRef,
-    components::{InputArg, OutputArg},
-};
 use derive_new::new;
-
-#[derive(Clone)]
-pub struct ConvolutionArgs<const N_SPATIAL: usize> {
-    pub stride: [usize; N_SPATIAL],
-    pub padding: [usize; N_SPATIAL],
-    pub dilation: [usize; N_SPATIAL],
-}
-
-pub enum Strategy {
-    Simple {
-        read_strategy: ReadingStrategy,
-        tile_kind: AcceleratedTileKind,
-    },
-}
 
 macro_rules! with_tile_kind {
     ($kind: expr, $T: ident, $launch: expr) => {
@@ -128,8 +113,7 @@ struct Convolution<'a, R: Runtime, const N_SPATIAL: usize> {
 impl<'a, R: Runtime, const N_SPATIAL: usize> Convolution<'a, R, N_SPATIAL> {
     fn launch<Alg: Algorithm>(self) -> Result<(), ConvSetupError>
     where
-        InputArg<Alg::Args>: ConcreteInputsFactory,
-        OutputArg<Alg::Args>: ConcreteOutputFactory,
+        Alg::Args: ConcreteArgs,
     {
         let ConvolutionArgs {
             stride,
@@ -169,8 +153,7 @@ fn launch_with_algorithm<R: Runtime, Alg: Algorithm>(
     dtypes: MatmulElems,
 ) -> Result<(), ConvSetupError>
 where
-    InputArg<Alg::Args>: ConcreteInputsFactory,
-    OutputArg<Alg::Args>: ConcreteOutputFactory,
+    Alg::Args: ConcreteArgs,
 {
     let rank = input.data().shape.len();
     let dim_c = rank - 1;
@@ -184,8 +167,10 @@ where
     let kernel_shape = &weight.data().shape[1..dim_c];
     let out_shape = &out.shape[1..dim_c];
 
-    let input_data = Alg::into_tensor_handle(client, input.data(), *dtypes.lhs_global)?;
-    let weight_data = Alg::into_tensor_handle(client, weight.data(), *dtypes.rhs_global)?;
+    let op = ConvolutionOperation::Forward;
+
+    let input_data = Alg::into_tensor_handle(client, input.data(), *dtypes.lhs_global, op)?;
+    let weight_data = Alg::into_tensor_handle(client, weight.data(), *dtypes.rhs_global, op)?;
 
     let mut input = *input;
     let mut weight = *weight;
@@ -211,6 +196,9 @@ where
         out_shape: out_shape.to_vec(),
         channels: c,
 
+        padded_channels: c,
+        operation: op,
+
         dimensionality,
     };
 
@@ -228,8 +216,7 @@ pub fn launch_kernel<R: Runtime, Alg: Algorithm>(
     mut dtypes: MatmulElems,
 ) -> Result<(), ConvSetupError>
 where
-    InputArg<Alg::Args>: ConcreteInputsFactory,
-    OutputArg<Alg::Args>: ConcreteOutputFactory,
+    Alg::Args: ConcreteArgs,
 {
     let plane_dim = client.properties().hardware.plane_size_max;
     // Shape/strides are treated as k-major, with the last dim always being the contiguous one.
@@ -255,6 +242,7 @@ where
     let line_sizes = Alg::filter_line_sizes(line_sizes).pick_max()?;
 
     let selection = Alg::selection(client, &problem, plane_dim, &line_sizes, &mut dtypes)?;
+    let problem = Alg::Args::adjust_problem(client, problem, &selection, &dtypes);
 
     let config = Alg::setup(client, &problem, &selection, &line_sizes, &dtypes)?;
 

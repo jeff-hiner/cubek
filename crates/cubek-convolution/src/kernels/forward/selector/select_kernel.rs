@@ -1,4 +1,7 @@
-use crate::components::{ConvGemmConfig as _, global::args::RuntimeArgsLaunch};
+use crate::{
+    components::{ConvGemmConfig as _, global::args::RuntimeArgsLaunch},
+    forward::args::{ConcreteInputsFactory, ConcreteOutputFactory},
+};
 use cubecl::prelude::TensorHandleRef;
 use cubecl::{Runtime, client::ComputeClient};
 use cubek_matmul::components::MatmulElems;
@@ -11,14 +14,8 @@ use cubek_matmul::{
 };
 
 use crate::{
-    components::{
-        ConvSetupError, ConvolutionProblem,
-        global::{
-            args::{ConcreteInputsFactory, ConcreteOutputFactory},
-            entry_point::ConvolutionLaunch,
-        },
-    },
-    kernels::layered::algorithm::Algorithm,
+    components::{ConvSetupError, ConvolutionProblem, global::entry_point::ConvolutionLaunch},
+    kernels::forward::algorithm::Algorithm,
 };
 
 /// Select which kernel to launch for the given Algorithm.
