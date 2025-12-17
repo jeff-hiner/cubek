@@ -4,8 +4,9 @@ use cubecl::Runtime;
 use cubecl::client::ComputeClient;
 use cubecl::features::MmaConfig;
 
+use crate::components::batch::BatchMatmulFamily;
+use crate::components::stage::PlaneMatmulFamily;
 use crate::components::tile;
-use crate::components::{batch::CubeCountPlanSelection, stage::PlaneMatmulFamily};
 use crate::components::{
     batch::{PartitionedBatchMatmulFamily, RowMajorGlobalPartitionMatmul},
     tile::io::{Filled, Strided},
@@ -13,7 +14,8 @@ use crate::components::{
 use crate::components::{global::PlaneWriterFamily, stage::StageFamily};
 use crate::components::{stage::FilledStageFamily, tile::TileMatmulFamily};
 use crate::definition::{
-    MatmulLineSizes, MatmulProblem, MatmulSelection, MatmulSetupError, MatrixLayout, SwizzleConfig,
+    CubeCountPlanSelection, GlobalOrderSelection, HypercubeSelection, MatmulLineSizes,
+    MatmulProblem, MatmulSelection, MatmulSetupError, MatrixLayout, SmAllocation, SwizzleBlueprint,
     adjust_dtypes,
 };
 use crate::routines::base;
@@ -27,7 +29,6 @@ use crate::{
 };
 use crate::{
     components::{
-        batch::{GlobalOrderSelection, HypercubeSelection, SmAllocation},
         global::{LoadSpecializationConfig, SpecializationTensorConfig},
         stage::PartitionBuffering,
     },
@@ -49,19 +50,24 @@ where
         >,
     L: AsyncPartialLoadingStrategy,
 {
-    type SelectionArgs = ();
-    type TileMatmul = TMM;
-    type StageMatmul = PlaneMatmulFamily<Self::TileMatmul, L::Stage, L::Stage, FilledStageFamily>;
-    type GlobalMatmul = SpecializedMatmulFamily<Self::StageMatmul, L, PlaneWriterFamily>;
-    type BatchMatmul =
-        PartitionedBatchMatmulFamily<Self::GlobalMatmul, RowMajorGlobalPartitionMatmul>;
+    type Strategy = ();
+    type BatchMatmul = PartitionedBatchMatmulFamily<
+        SpecializedMatmulFamily<
+            PlaneMatmulFamily<TMM, L::Stage, L::Stage, FilledStageFamily>,
+            L,
+            PlaneWriterFamily,
+        >,
+        RowMajorGlobalPartitionMatmul,
+    >;
+    type Blueprint = MatmulSelection;
+    type Config = <Self::BatchMatmul as BatchMatmulFamily>::Config;
 
-    fn selection<R: Runtime>(
+    fn prepare<R: Runtime>(
         client: &ComputeClient<R>,
         problem: &MatmulProblem,
         plane_dim: u32,
         line_sizes: &MatmulLineSizes,
-        _args: &Self::SelectionArgs,
+        _args: &Self::Strategy,
         dtypes: &mut MatmulElems,
     ) -> Result<MatmulSelection, MatmulSetupError> {
         plane_matmul_selection::<TMM, R>(
@@ -79,6 +85,10 @@ where
                 ..Default::default()
             },
         )
+    }
+
+    fn can_cast_stage_element() -> bool {
+        TMM::can_cast_stage_element()
     }
 }
 
@@ -173,7 +183,7 @@ fn selection_specialized<R: Runtime, TMM: TileMatmulFamily>(
 
         let lhs = select_swizzle(lhs_swizzle_dim, *dtypes.lhs_stage, line_sizes.lhs);
         let rhs = select_swizzle(rhs_swizzle_dim, *dtypes.rhs_stage, line_sizes.rhs);
-        builder = builder.shared_swizzle(SwizzleConfig {
+        builder = builder.shared_swizzle(SwizzleBlueprint {
             lhs,
             rhs,
             ..Default::default()

@@ -11,8 +11,8 @@ use crate::components::{
 };
 use crate::definition::MatmulSelection;
 use crate::definition::{
-    AccS, AvailableLineSizes, LhsS, MatmulElems, MatmulLineSizes, MatmulPrecision, MatmulProblem,
-    MatmulSetupError, RhsS,
+    AccS, LhsS, MatmulElems, MatmulLineSizes, MatmulPrecision, MatmulProblem, MatmulSetupError,
+    RhsS,
 };
 use std::{fmt::Debug, hash::Hash};
 
@@ -56,13 +56,6 @@ pub trait StageMatmulFamily: Send + Sync + 'static {
         max_global_readers: Option<MaxGlobalReaderPlanes>,
         dtypes: &MatmulElems,
     ) -> Result<Self::Config, MatmulSetupError>;
-
-    /// Filters out line sizes that are incompatible with this matmul family.
-    ///
-    /// By default, returns the input unchanged.
-    fn filter_line_sizes(available_line_sizes: AvailableLineSizes) -> AvailableLineSizes {
-        available_line_sizes
-    }
 }
 
 #[cube]

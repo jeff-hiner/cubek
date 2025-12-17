@@ -1,6 +1,6 @@
-use crate::components::batch::partitioned_matmul::hypercube::{
-    cube_count_plan::{CubeCountPlan, CubeCountPlanConfig, CubeCountPlanSelection},
-    global_order::{GlobalOrder, GlobalOrderSelection},
+use crate::definition::hypercube::{
+    CubeCountPlanSelection, GlobalOrder, GlobalOrderSelection,
+    cube_count_plan::{CubeCountPlan, CubeCountPlanBlueprint},
 };
 use crate::definition::{MatmulProblem, MatmulSetupError, TilingScheme};
 use cubecl::CubeCount;
@@ -28,7 +28,7 @@ pub struct HypercubeSelectionBuilder<'a> {
 pub struct HypercubeConfig {
     pub cube_span: CubeSpan,
     pub global_order: GlobalOrder,
-    pub cube_count_plan_config: CubeCountPlanConfig,
+    pub cube_count_plan_blueprint: CubeCountPlanBlueprint,
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -51,12 +51,12 @@ impl HypercubeSelection {
         max_cube_count: CubeCount,
     ) -> HypercubeConfig {
         let cube_count_plan = CubeCountPlan::from_selection(self, problem, max_cube_count);
-        let cube_count_plan_config = CubeCountPlanConfig::from_cube_count_plan(cube_count_plan);
+        let cube_count_plan_config = CubeCountPlanBlueprint::from_cube_count_plan(cube_count_plan);
 
         HypercubeConfig {
             cube_span: self.cube_span,
             global_order: self.global_order,
-            cube_count_plan_config,
+            cube_count_plan_blueprint: cube_count_plan_config,
         }
     }
 }
@@ -135,8 +135,8 @@ impl HypercubeConfig {
     pub fn cube_count_plan(
         &self,
         problem: &MatmulProblem,
-        max_cube_count: CubeCount,
+        max_cube_count: &CubeCount,
     ) -> CubeCountPlan {
-        CubeCountPlan::from_config(self, problem, max_cube_count)
+        CubeCountPlan::from_blueprint(self, problem, max_cube_count)
     }
 }

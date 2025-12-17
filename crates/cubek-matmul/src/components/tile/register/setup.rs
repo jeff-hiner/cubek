@@ -10,8 +10,8 @@ use crate::components::{
 use crate::definition::MatmulSelection;
 use crate::definition::MatmulSetupError;
 use crate::definition::{
-    AvailableLineSizes, InvalidConfigError, MatmulAvailabilityError, MatmulElems, MatmulLineSizes,
-    MatmulProblem, MatrixLayout,
+    InvalidConfigError, MatmulAvailabilityError, MatmulElems, MatmulLineSizes, MatmulProblem,
+    MatrixLayout,
 };
 use cubecl::features::TypeUsage;
 use cubecl::ir::{ElemType, FloatKind};
@@ -73,10 +73,6 @@ where
         // reduce conflicts significantly (i.e. average 18 vs average 5). Should try to find more
         // optimal settings in the future.
         client.properties().features.alignment
-    }
-
-    fn filter_line_sizes(available_line_sizes: AvailableLineSizes) -> AvailableLineSizes {
-        available_line_sizes
     }
 }
 
