@@ -13,9 +13,9 @@ use crate::components::stage::StridedStageFamily;
 use crate::components::stage::{ContiguousTilingLayout, StridedStageMemory, TilingOrder};
 use crate::components::{global::memory::GlobalIterator, stage::TilingValidation};
 use crate::definition::{InvalidConfigError, MatmulElems, MatmulProblem, StageIdent};
-use cubecl::prelude::barrier::Barrier;
 use cubecl::prelude::*;
 use cubecl::std::tensor::layout::{Layout, LayoutExpand};
+use cubecl::{ir::DeviceProperties, prelude::barrier::Barrier};
 
 use super::{LoadingJob, LoadingValidation, ReaderMode};
 
@@ -28,7 +28,10 @@ pub struct AsyncFullCyclicLoading<T: TilingOrder> {
 }
 
 impl<TO: TilingOrder> LoadingValidation for AsyncFullCyclicLoading<TO> {
-    fn validate_with_config(config: &GlobalReaderConfig) -> Result<(), InvalidConfigError> {
+    fn validate_with_config(
+        device_props: &DeviceProperties,
+        config: &GlobalReaderConfig,
+    ) -> Result<(), InvalidConfigError> {
         let line_size = ASYNC_COPY_WIDTH / config.smem_config.dtype.size_bits() as u32;
 
         if let ReaderMode::Strict = config.reader_mode {
@@ -53,8 +56,12 @@ impl<TO: TilingOrder> LoadingValidation for AsyncFullCyclicLoading<TO> {
         }
 
         validate_swizzle_atom_size(config.smem_config)?;
-        validate_async_barrier()?;
-        validate_async_copy(&config.gmem_config.dtype, &config.smem_config.dtype)?;
+        validate_async_barrier(device_props)?;
+        validate_async_copy(
+            device_props,
+            &config.gmem_config.dtype,
+            &config.smem_config.dtype,
+        )?;
         ContiguousTilingLayout::<TO>::check(config.smem_config)?;
 
         Ok(())
@@ -73,7 +80,7 @@ impl<TO: TilingOrder> LoadMaxRoundPlaneCount for AsyncFullCyclicLoading<TO> {
     fn max_round_plane_count(
         elements_per_tile: u32,
         tiles_per_stage: u32,
-        _line_size: u8,
+        _line_size: LineSize,
         plane_dim: u32,
         dtype: StorageType,
     ) -> u32 {
@@ -91,19 +98,19 @@ impl<TO: TilingOrder> FullLoadingStrategy for AsyncFullCyclicLoading<TO> {
     type Job<EG: Numeric, ES: Numeric> = AsyncFullCyclicJob;
 
     fn new_job<EG: Numeric, ES: Numeric>(
-        #[comptime] _line_size: u32,
+        #[comptime] _line_size: LineSize,
         #[comptime] config: GlobalReaderConfig,
     ) -> Self::Job<EG, ES> {
-        let type_size = ES::type_size_bits();
-        let line_size = comptime![ASYNC_COPY_WIDTH / type_size];
+        let type_size = ES::type_size_bits().comptime();
+        let line_size = ASYNC_COPY_WIDTH / type_size as u32;
         let tile_num_elements = config.smem_config.elements_per_tile();
         let num_stage_elements = config.smem_config.elements_per_stage();
 
         let num_stage_lines = num_stage_elements.div_ceil(line_size);
         let total_units = config.loading_units_count();
-        let num_tasks_per_unit = comptime!(num_stage_lines.div_ceil(total_units));
-        let balanced_workload = comptime!(num_stage_lines.is_multiple_of(total_units));
-        let jump_length = comptime!(total_units * line_size);
+        let num_tasks_per_unit = num_stage_lines.div_ceil(total_units);
+        let balanced_workload = num_stage_lines.is_multiple_of(total_units);
+        let jump_length = total_units * line_size;
 
         let unit_id = PlaneFlowPartition::new(config.plane_flow_config.partition_rule)
             .load_index(config.input_load_flow)
@@ -192,7 +199,7 @@ pub(crate) fn copy_line<EG: Numeric, ES: Numeric, TO: TilingOrder>(
     let tile = ContiguousTilingLayout::<TO>::to_x_y(nth_tile, config.smem_config);
 
     let pos = layout.to_source_pos((tile, pos_within_tile));
-    let stage_offset = unit_position / stage.smem.line_size();
+    let stage_offset = unit_position / stage.smem.line_size() as u32;
 
     async_copy_from(view, pos, stage, stage_offset, config, job.copy_line_size);
 }

@@ -1,3 +1,4 @@
+use cubecl::ir::DeviceProperties;
 use cubek_matmul::components::{
     global::{
         GlobalConfig, GlobalReaderConfig, GlobalWriterConfig, MatmulPlaneCounts,
@@ -62,6 +63,7 @@ where
     }
 
     fn expand_config(
+        device_props: &DeviceProperties,
         problem: &ConvolutionProblem,
         blueprint: &TilingBlueprint,
         line_sizes: &MatmulLineSizes,
@@ -74,6 +76,7 @@ where
         let plane_counts = MatmulPlaneCounts::new(blueprint.load_flows, plane_flow_config.counts);
 
         let stage_config = SMM::expand_config(
+            device_props,
             blueprint,
             plane_flow_config,
             (1, 1).into(),
@@ -107,7 +110,7 @@ where
         let reader_mode = blueprint.reader_mode;
 
         let lhs_gmem_config = GlobalMemoryConfig {
-            line_size: line_sizes.lhs as u32,
+            line_size: line_sizes.lhs,
             check_row_bounds: check_m_bounds,
             check_col_bounds: check_k_bounds,
             matrix_layout: problem.lhs_layout,
@@ -116,7 +119,7 @@ where
         };
 
         let rhs_gmem_config = GlobalMemoryConfig {
-            line_size: line_sizes.rhs as u32,
+            line_size: line_sizes.rhs,
             check_row_bounds: check_k_bounds,
             check_col_bounds: check_n_bounds,
             matrix_layout: problem.rhs_layout,
@@ -125,7 +128,7 @@ where
         };
 
         let out_gmem_config = GlobalMemoryConfig {
-            line_size: line_sizes.out as u32,
+            line_size: line_sizes.out,
             matrix_layout: MatrixLayout::RowMajor,
             check_row_bounds: check_m_bounds,
             check_col_bounds: check_n_bounds,

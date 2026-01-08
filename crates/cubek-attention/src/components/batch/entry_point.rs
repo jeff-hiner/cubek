@@ -45,11 +45,11 @@ pub(crate) fn attention<
         blueprint,
         &AttentionElems::from_define_array(elem_types)
     ));
-    if comptime!(config.is_err()) {
+    if config.is_err() {
         push_validation_error(config.err().unwrap().to_string());
         comptime!(return);
     }
-    let config = comptime!(config.unwrap());
+    let config = config.unwrap();
 
     let mut state = Args::init_state(inputs, output);
 

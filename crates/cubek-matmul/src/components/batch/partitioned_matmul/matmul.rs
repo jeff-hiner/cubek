@@ -50,12 +50,14 @@ pub(crate) fn matmul_entry<
     let line_size_rhs = Args::view_rhs(&state).line_size();
     let line_size_out = Args::view_out(&mut state).line_size();
     let line_sizes = comptime!(MatmulLineSizes {
-        lhs: line_size_lhs as u8,
-        rhs: line_size_rhs as u8,
-        out: line_size_out as u8,
+        lhs: line_size_lhs,
+        rhs: line_size_rhs,
+        out: line_size_out,
     });
 
+    let device_props = comptime::device_properties();
     let config = comptime!(PartitionedBatchMatmulFamily::<GMMF, GPM>::expand_config(
+        &device_props,
         &blueprint,
         &MatmulElems::from_define_arrays(global, stage, register),
         &line_sizes
@@ -69,7 +71,7 @@ pub(crate) fn matmul_entry<
     let config = comptime!(config.unwrap());
 
     #[allow(clippy::collapsible_if)]
-    if comptime!(cube_mapping.can_yield_extra_cubes) {
+    if cube_mapping.can_yield_extra_cubes {
         if CUBE_POS >= cube_mapping.num_valid_cubes() {
             terminate!()
         }

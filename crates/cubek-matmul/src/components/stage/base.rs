@@ -1,5 +1,5 @@
-use cubecl::prelude::*;
 use cubecl::std::{CubeOption, CubeOptionExpand, tensor::layout::Coords2d};
+use cubecl::{ir::DeviceProperties, prelude::*};
 
 use crate::components::CubeDimResource;
 use crate::components::global::PlaneFlowConfig;
@@ -45,6 +45,7 @@ pub trait StageMatmulFamily: Send + Sync + 'static {
     /// This function may return an error if the configuration cannot be supported on the current runtime.
     #[allow(clippy::too_many_arguments)]
     fn expand_config(
+        device_props: &DeviceProperties,
         blueprint: &TilingBlueprint,
         plane_flow_config: PlaneFlowConfig,
         num_stages: NumStages,
@@ -207,7 +208,7 @@ pub trait StageFamily<IO: SliceVisibility = ReadOnly>: Send + Sync + 'static {
 pub trait LoadStageFamily<IO: SliceVisibility = ReadOnly>: StageFamily {
     /// Create a new stage from the config and alignment
     fn create<ES: Numeric, T: TilingLayout>(
-        #[comptime] alignment: u32,
+        #[comptime] alignment: usize,
         #[comptime] config: StageMemoryConfig,
     ) -> Self::Stage<ES, T>;
     /// Return the same stage with a different buffer index
@@ -234,7 +235,7 @@ impl<ES: Numeric, IO: SliceVisibility, Inner: Stage<ES, IO>> Stage<ES, IO> for C
 #[cube]
 impl<IO: SliceVisibility, Inner: LoadStageFamily<IO>> LoadStageFamily<IO> for Option<Inner> {
     fn create<ES: Numeric, T: TilingLayout>(
-        #[comptime] alignment: u32,
+        #[comptime] alignment: usize,
         #[comptime] config: StageMemoryConfig,
     ) -> Self::Stage<ES, T> {
         CubeOption::new_Some(Inner::create(alignment, config))

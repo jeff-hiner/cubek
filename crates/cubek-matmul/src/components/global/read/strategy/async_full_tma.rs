@@ -7,8 +7,8 @@ use crate::components::stage::{StridedStageMemory, SwizzleMode};
 use crate::components::{global::memory::GlobalIterator, stage::TilingValidation};
 use crate::components::{global::multi_stage::LoadMaxRoundPlaneCount, stage::TmaTilingLayout};
 use crate::definition::{InvalidConfigError, MatmulElems, MatmulProblem, MatrixLayout, StageIdent};
-use cubecl::prelude::barrier::Barrier;
 use cubecl::prelude::*;
+use cubecl::{ir::DeviceProperties, prelude::barrier::Barrier};
 
 use super::{LoadingJob, LoadingValidation};
 
@@ -19,10 +19,13 @@ use super::{LoadingJob, LoadingValidation};
 pub struct AsyncFullTmaLoading {}
 
 impl LoadingValidation for AsyncFullTmaLoading {
-    fn validate_with_config(config: &GlobalReaderConfig) -> Result<(), InvalidConfigError> {
+    fn validate_with_config(
+        device_props: &DeviceProperties,
+        config: &GlobalReaderConfig,
+    ) -> Result<(), InvalidConfigError> {
         TmaTilingLayout::check(config.smem_config)?;
-        validate_async_barrier()?;
-        validate_tma(&config.smem_config, &config.gmem_config.dtype)?;
+        validate_async_barrier(device_props)?;
+        validate_tma(device_props, &config.smem_config, &config.gmem_config.dtype)?;
 
         Ok(())
     }
@@ -40,7 +43,7 @@ impl LoadMaxRoundPlaneCount for AsyncFullTmaLoading {
     fn max_round_plane_count(
         _elements_per_tile: u32,
         _tiles_per_stage: u32,
-        _line_size: u8,
+        _line_size: LineSize,
         _plane_dim: u32,
         _dtype: StorageType,
     ) -> u32 {
@@ -57,7 +60,7 @@ impl FullLoadingStrategy for AsyncFullTmaLoading {
     type Job<EG: Numeric, ES: Numeric> = AsyncFullTmaJob;
 
     fn new_job<EG: Numeric, ES: Numeric>(
-        #[comptime] _line_size: u32,
+        #[comptime] _line_size: LineSize,
         #[comptime] config: GlobalReaderConfig,
     ) -> Self::Job<EG, ES> {
         let role_rule_config = config.plane_flow_config.partition_rule;
@@ -68,10 +71,10 @@ impl FullLoadingStrategy for AsyncFullTmaLoading {
         };
         // Swizzle renders the column format irrelevant, so we load the whole stage at once
         // The tiling is set on launch for TMA, so no further change is needed here.
-        let num_tasks = comptime![match config.swizzle {
+        let num_tasks = match config.swizzle {
             SwizzleMode::None => tile_count_col,
             _ => 1u32,
-        }];
+        };
 
         let is_elected = PlaneFlowPartition::new(role_rule_config).elect_load_leader();
 
@@ -103,7 +106,7 @@ impl<EG: Numeric, ES: Numeric> LoadingJob<EG, ES, TmaTilingLayout, AsyncTma> for
         #[comptime] config: GlobalReaderConfig,
     ) {
         if this.is_elected {
-            let config = comptime![config.smem_config];
+            let config = config.smem_config;
 
             let size_row = match config.matrix_layout {
                 MatrixLayout::RowMajor => config.elements_per_stage_along_row(),
@@ -116,15 +119,15 @@ impl<EG: Numeric, ES: Numeric> LoadingJob<EG, ES, TmaTilingLayout, AsyncTma> for
 
             let global_view = global_iter.view();
             let mut stage = stage.as_slice_mut(stage.smem.line_size());
-            let slice_size = size_row * size_col / stage.line_size();
+            let slice_size = size_row * size_col / stage.line_size() as u32;
 
             let slice_start = task_id * slice_size;
-            let slice = stage.slice_mut(slice_start, slice_start + slice_size);
+            let slice = stage.slice_mut(slice_start as usize, (slice_start + slice_size) as usize);
             let col = task_id * size_col;
 
             let pos = match config.matrix_layout {
-                MatrixLayout::RowMajor => (0, col),
-                MatrixLayout::ColMajor => (col, 0),
+                MatrixLayout::RowMajor => (0u32, col).runtime(),
+                MatrixLayout::ColMajor => (col, 0u32).runtime(),
             };
 
             global_view.tensor_map_load(barrier, &mut slice.try_cast_unchecked(), pos);

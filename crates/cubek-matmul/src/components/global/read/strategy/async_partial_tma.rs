@@ -14,8 +14,8 @@ use crate::definition::{
     InvalidConfigError, LhsS, MatmulElems, MatmulPrecision, MatmulProblem, MatrixLayout, RhsS,
     StageIdent,
 };
-use cubecl::prelude::barrier::Barrier;
 use cubecl::prelude::*;
+use cubecl::{ir::DeviceProperties, prelude::barrier::Barrier};
 
 use super::{LoadingJob, LoadingValidation};
 
@@ -26,10 +26,13 @@ use super::{LoadingJob, LoadingValidation};
 pub struct AsyncPartialTmaLoading {}
 
 impl LoadingValidation for AsyncPartialTmaLoading {
-    fn validate_with_config(config: &GlobalReaderConfig) -> Result<(), InvalidConfigError> {
+    fn validate_with_config(
+        device_props: &DeviceProperties,
+        config: &GlobalReaderConfig,
+    ) -> Result<(), InvalidConfigError> {
         TmaTilingLayout::check(config.smem_config)?;
-        validate_async_barrier()?;
-        validate_tma(&config.smem_config, &config.gmem_config.dtype)?;
+        validate_async_barrier(device_props)?;
+        validate_tma(device_props, &config.smem_config, &config.gmem_config.dtype)?;
 
         Ok(())
     }
@@ -47,7 +50,7 @@ impl LoadMaxRoundPlaneCount for AsyncPartialTmaLoading {
     fn max_round_plane_count(
         _elements_per_tile: u32,
         _tiles_per_stage: u32,
-        _line_size: u8,
+        _line_size: LineSize,
         _plane_dim: u32,
         _dtype: StorageType,
     ) -> u32 {
@@ -65,7 +68,7 @@ impl PartialLoadingStrategy for AsyncPartialTmaLoading {
 
     fn new_job<EG: Numeric, ES: Numeric>(
         #[comptime] stage_index: u32,
-        #[comptime] _line_size: u32,
+        #[comptime] _line_size: LineSize,
         #[comptime] config: GlobalReaderConfig,
     ) -> Self::Job<EG, ES> {
         let role_rule_config = config.plane_flow_config.partition_rule;
@@ -76,10 +79,10 @@ impl PartialLoadingStrategy for AsyncPartialTmaLoading {
         };
         // Swizzle renders the column format irrelevant, so we load the whole stage at once
         // The tiling is set on launch for TMA, so no further change is needed here.
-        let num_tasks = comptime![match config.swizzle {
+        let num_tasks = match config.swizzle {
             SwizzleMode::None => tile_count_col,
             _ => 1u32,
-        }];
+        };
 
         let is_elected = PlaneFlowPartition::new(role_rule_config).elect_load_leader();
 
@@ -140,11 +143,11 @@ impl<EG: Numeric, ES: Numeric> LoadingJob<EG, ES, TmaTilingLayout, AsyncTma>
             .runtime();
 
             let global_view = global_iter.view();
-            let mut stage = stage.as_slice_mut(1u32);
+            let mut stage = stage.as_slice_mut(1usize);
             let slice_size = size_row * size_col;
 
             let slice_start = task_id * slice_size;
-            let slice = stage.slice_mut(slice_start, slice_start + slice_size);
+            let slice = stage.slice_mut(slice_start as usize, (slice_start + slice_size) as usize);
             // "column" to be loaded, may be a row for col-major (can't think of a better name)
             let load_col = task_id * size_col;
 
@@ -176,13 +179,13 @@ impl AsyncPartialLoadingStrategy for AsyncPartialTmaLoading {
         barrier: &mut Barrier,
         #[comptime] config: SharedGlobalMatmulConfig<S>,
     ) {
-        let lhs_elem_size = LhsS::<MP>::type_size();
-        let rhs_elem_size = RhsS::<MP>::type_size();
-        let stage_bytes = comptime! {
-            let lhs_bytes = config.lhs_reader_config().smem_config.elements_per_stage() * lhs_elem_size;
-            let rhs_bytes = config.rhs_reader_config().smem_config.elements_per_stage() * rhs_elem_size;
-            lhs_bytes + rhs_bytes
-        };
+        let lhs_elem_size = LhsS::<MP>::type_size().comptime();
+        let rhs_elem_size = RhsS::<MP>::type_size().comptime();
+        let lhs_bytes =
+            config.lhs_reader_config().smem_config.elements_per_stage() * lhs_elem_size as u32;
+        let rhs_bytes =
+            config.rhs_reader_config().smem_config.elements_per_stage() * rhs_elem_size as u32;
+        let stage_bytes = lhs_bytes + rhs_bytes;
         barrier.arrive_and_expect_tx(1, stage_bytes);
     }
 

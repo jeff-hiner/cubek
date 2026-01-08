@@ -29,9 +29,9 @@ use crate::definition::MatmulElems;
 use crate::definition::MatmulPrecision;
 use crate::definition::MatmulProblem;
 use crate::definition::StageIdent;
-use cubecl::prelude::barrier::Barrier;
 use cubecl::prelude::*;
 use cubecl::std::tensor::layout::{Layout, LayoutExpand};
+use cubecl::{ir::DeviceProperties, prelude::barrier::Barrier};
 
 use super::{LoadingJob, LoadingValidation, ReaderMode};
 
@@ -44,7 +44,10 @@ pub struct AsyncPartialCyclicLoading<T: TilingOrder> {
 }
 
 impl<TO: TilingOrder> LoadingValidation for AsyncPartialCyclicLoading<TO> {
-    fn validate_with_config(config: &GlobalReaderConfig) -> Result<(), InvalidConfigError> {
+    fn validate_with_config(
+        device_props: &DeviceProperties,
+        config: &GlobalReaderConfig,
+    ) -> Result<(), InvalidConfigError> {
         let line_size = ASYNC_COPY_WIDTH / config.smem_config.dtype.size_bits() as u32;
         if let ReaderMode::Strict = config.reader_mode {
             let num_lines_per_tile = config.smem_config.elements_per_tile() / line_size;
@@ -78,8 +81,12 @@ impl<TO: TilingOrder> LoadingValidation for AsyncPartialCyclicLoading<TO> {
         }
 
         validate_swizzle_atom_size(config.smem_config)?;
-        validate_async_barrier()?;
-        validate_async_copy(&config.gmem_config.dtype, &config.smem_config.dtype)?;
+        validate_async_barrier(device_props)?;
+        validate_async_copy(
+            device_props,
+            &config.gmem_config.dtype,
+            &config.smem_config.dtype,
+        )?;
         ContiguousTilingLayout::<TO>::check(config.smem_config)?;
 
         Ok(())
@@ -98,7 +105,7 @@ impl<TO: TilingOrder> LoadMaxRoundPlaneCount for AsyncPartialCyclicLoading<TO> {
     fn max_round_plane_count(
         elements_per_tile: u32,
         tiles_per_stage: u32,
-        _line_size: u8,
+        _line_size: LineSize,
         plane_dim: u32,
         dtype: StorageType,
     ) -> u32 {
@@ -119,11 +126,11 @@ impl<TO: TilingOrder> PartialLoadingStrategy for AsyncPartialCyclicLoading<TO> {
 
     fn new_job<EG: Numeric, ES: Numeric>(
         #[comptime] stage_index: u32,
-        #[comptime] _line_size: u32,
+        #[comptime] _line_size: LineSize,
         #[comptime] config: GlobalReaderConfig,
     ) -> AsyncPartialCyclicJob {
-        let type_size = ES::type_size_bits();
-        let line_size = comptime![ASYNC_COPY_WIDTH / type_size];
+        let type_size = ES::type_size_bits().comptime();
+        let line_size = ASYNC_COPY_WIDTH / type_size as u32;
         let num_stage_elements = config.smem_config.elements_per_stage();
 
         let tile_size = config.smem_config.elements_per_tile();
@@ -223,13 +230,9 @@ pub(crate) fn copy_line<EG: Numeric, ES: Numeric, TO: TilingOrder>(
     let layout = TiledLayout::new(config.stage_ident, config.smem_config);
     let view = global_iter.view();
 
-    let (tile_size, tile_count_row, tile_count_col) = comptime! {
-        (
-            config.smem_config.elements_per_tile(),
-            config.smem_config.tiles_per_stage_along_row(),
-            config.smem_config.tiles_per_stage_along_col(),
-        )
-    };
+    let tile_size = config.smem_config.elements_per_tile();
+    let tile_count_row = config.smem_config.tiles_per_stage_along_row();
+    let tile_count_col = config.smem_config.tiles_per_stage_along_col();
 
     let tile_index = unit_position / tile_size;
     let pos_within_tile = unit_position % tile_size;
@@ -238,10 +241,10 @@ pub(crate) fn copy_line<EG: Numeric, ES: Numeric, TO: TilingOrder>(
         tile_index,
         tile_count_row,
         tile_count_col,
-        comptime!(config.smem_config),
+        config.smem_config,
     );
 
-    let tile = match comptime!(config.stage_ident) {
+    let tile = match config.stage_ident {
         StageIdent::Lhs => (
             tile_x_within_stage,
             job.stage_index * tile_count_col + tile_y_within_stage,
@@ -250,13 +253,13 @@ pub(crate) fn copy_line<EG: Numeric, ES: Numeric, TO: TilingOrder>(
             job.stage_index * tile_count_row + tile_x_within_stage,
             tile_y_within_stage,
         ),
-        _ => comptime!(unreachable!()),
+        _ => unreachable!(),
     };
 
     let pos = layout.to_source_pos((tile, pos_within_tile));
 
     let tile_start = tile_index * job.num_lines_per_tile * job.copy_line_size;
-    let stage_offset = (tile_start + pos_within_tile) / stage.smem.line_size();
+    let stage_offset = (tile_start + pos_within_tile) / stage.smem.line_size() as u32;
 
     async_copy_from(view, pos, stage, stage_offset, config, job.copy_line_size);
 }

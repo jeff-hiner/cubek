@@ -42,7 +42,7 @@ pub(crate) enum CubeMappingStrategy {
 #[cube]
 impl CubeMapping {
     /// Returns the number of valid cubes
-    pub fn num_valid_cubes(&self) -> u32 {
+    pub fn num_valid_cubes(&self) -> usize {
         match &self.strategy {
             CubeMappingStrategy::FromProblem | CubeMappingStrategy::Flattened { .. } => {
                 panic!("Shouldn't need to be called because the cube count should always be exact")
@@ -61,7 +61,7 @@ impl CubeMapping {
                 m_cubes,
                 n_cubes,
                 batch_cubes,
-            } => *m_cubes * *n_cubes * *batch_cubes,
+            } => *m_cubes as usize * *n_cubes as usize * *batch_cubes as usize,
         }
     }
 
@@ -82,15 +82,20 @@ impl CubeMapping {
             CubeMappingStrategy::CubeFirst {
                 m_cubes, n_cubes, ..
             } => self.strategy.absolute_index_to_m_n_batch(
-                CUBE_POS_Y * CUBE_COUNT_X + CUBE_POS_X,
+                CUBE_POS_Y as usize * CUBE_COUNT_X as usize + CUBE_POS_X as usize,
                 *m_cubes,
                 *n_cubes,
                 self.global_order,
             ),
 
-            CubeMappingStrategy::Flattened { m_cubes, n_cubes } => self
-                .strategy
-                .absolute_index_to_m_n_batch(CUBE_POS_X, *m_cubes, *n_cubes, self.global_order),
+            CubeMappingStrategy::Flattened { m_cubes, n_cubes } => {
+                self.strategy.absolute_index_to_m_n_batch(
+                    CUBE_POS_X as usize,
+                    *m_cubes,
+                    *n_cubes,
+                    self.global_order,
+                )
+            }
 
             CubeMappingStrategy::Spread {
                 m_cubes, n_cubes, ..
@@ -108,25 +113,31 @@ impl CubeMapping {
 impl CubeMappingStrategy {
     fn absolute_index_to_m_n_batch(
         &self,
-        absolute_index: u32,
+        absolute_index: usize,
         m_cubes: u32,
         n_cubes: u32,
         #[comptime] global_order: GlobalOrder,
     ) -> (u32, u32, u32) {
-        let batch_stride = m_cubes * n_cubes;
+        let batch_stride = (m_cubes * n_cubes) as usize;
         let batch_pos = absolute_index / batch_stride;
         let matrix_pos = absolute_index % batch_stride;
 
         let (m_pos, n_pos) = match comptime!(global_order) {
-            GlobalOrder::RowMajor => (matrix_pos / n_cubes, matrix_pos % n_cubes),
-            GlobalOrder::ColMajor => (matrix_pos % m_cubes, matrix_pos / m_cubes),
+            GlobalOrder::RowMajor => (
+                (matrix_pos / n_cubes as usize) as u32,
+                matrix_pos as u32 % n_cubes,
+            ),
+            GlobalOrder::ColMajor => (
+                matrix_pos as u32 % m_cubes,
+                (matrix_pos / m_cubes as usize) as u32,
+            ),
             GlobalOrder::SwizzleRowMajor(w) => {
-                let (x, y) = swizzle(matrix_pos, n_cubes, w);
+                let (x, y) = swizzle(matrix_pos, n_cubes as usize, w);
                 (y, x)
             }
-            GlobalOrder::SwizzleColMajor(w) => swizzle(matrix_pos, m_cubes, w),
+            GlobalOrder::SwizzleColMajor(w) => swizzle(matrix_pos, m_cubes as usize, w),
         };
 
-        (m_pos, n_pos, batch_pos)
+        (m_pos, n_pos, batch_pos as u32)
     }
 }

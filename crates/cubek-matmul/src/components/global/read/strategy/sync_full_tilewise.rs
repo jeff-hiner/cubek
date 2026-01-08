@@ -11,8 +11,8 @@ use crate::components::{global::multi_stage::LoadMaxRoundPlaneCount, stage::Tili
 use crate::definition::{
     FormattedConfigError, InvalidConfigError, MatmulElems, MatmulProblem, StageIdent,
 };
-use cubecl::prelude::*;
 use cubecl::std::{tensor::layout::Coords2d, type_size};
+use cubecl::{ir::DeviceProperties, prelude::*};
 
 use super::{LoadingJob, LoadingValidation};
 
@@ -34,7 +34,7 @@ impl<TO: TilingOrder> LoadMaxRoundPlaneCount for SyncFullTilewiseLoading<TO> {
     fn max_round_plane_count(
         _elements_per_tile: u32,
         tiles_per_stage: u32,
-        _line_size: u8,
+        _line_size: LineSize,
         _plane_dim: u32,
         _dtype: StorageType,
     ) -> u32 {
@@ -43,7 +43,10 @@ impl<TO: TilingOrder> LoadMaxRoundPlaneCount for SyncFullTilewiseLoading<TO> {
 }
 
 impl<T: TilingOrder> LoadingValidation for SyncFullTilewiseLoading<T> {
-    fn validate_with_config(config: &GlobalReaderConfig) -> Result<(), InvalidConfigError> {
+    fn validate_with_config(
+        _device_props: &DeviceProperties,
+        config: &GlobalReaderConfig,
+    ) -> Result<(), InvalidConfigError> {
         let line_size = config.gmem_config.line_size;
         let num_planes = config.loading_planes_count();
         let num_tiles = config.smem_config.tiles_per_stage();
@@ -56,12 +59,12 @@ impl<T: TilingOrder> LoadingValidation for SyncFullTilewiseLoading<T> {
             }));
         }
 
-        let num_tiles_per_plane = comptime!(num_tiles / num_planes);
-        let num_lines_per_tile = comptime!(config.smem_config.elements_per_tile() / line_size);
+        let num_tiles_per_plane = num_tiles / num_planes;
+        let num_lines_per_tile = config.smem_config.elements_per_tile() / line_size as u32;
         let num_lines_per_plane = num_lines_per_tile * num_tiles_per_plane;
         let plane_dim = config.plane_dim;
 
-        if num_lines_per_plane % plane_dim != 0 {
+        if !num_lines_per_plane.is_multiple_of(plane_dim) {
             return Err(FormattedConfigError::new(move || {
                 format!(
                     "Plane dimension {plane_dim:?} must divide number of lines per plane {num_lines_per_plane:?} for tilewise loading.",
@@ -91,14 +94,14 @@ impl<TO: TilingOrder> FullLoadingStrategy for SyncFullTilewiseLoading<TO> {
     type Job<EG: Numeric, ES: Numeric> = SyncFullTilewiseJob;
 
     fn new_job<EG: Numeric, ES: Numeric>(
-        #[comptime] line_size: u32,
+        #[comptime] line_size: LineSize,
         #[comptime] config: GlobalReaderConfig,
     ) -> Self::Job<EG, ES> {
         let num_planes = config.loading_planes_count();
         let num_tiles = config.smem_config.tiles_per_stage();
 
-        let num_tiles_per_plane = comptime!(num_tiles / num_planes);
-        let num_lines_per_tile = comptime!(config.smem_config.elements_per_tile() / line_size);
+        let num_tiles_per_plane = num_tiles / num_planes;
+        let num_lines_per_tile = config.smem_config.elements_per_tile() / line_size as u32;
         let num_lines_per_plane = num_lines_per_tile * num_tiles_per_plane;
         let num_lines_per_unit = num_lines_per_plane / config.plane_dim;
 
@@ -130,7 +133,7 @@ pub struct SyncFullTilewiseJob {
     #[cube(comptime)]
     pub plane_dim: u32,
     #[cube(comptime)]
-    pub line_size: u32,
+    pub line_size: LineSize,
 }
 
 #[cube]
@@ -152,8 +155,7 @@ impl<EG: Numeric, ES: Numeric, TO: TilingOrder>
         let line_index_within_tile = pos_across_tiles % this.num_lines_per_tile;
 
         let nth_tile_global = nth_tile_for_this_plane + this.num_tiles_to_skip;
-        let tile =
-            ContiguousTilingLayout::<TO>::to_x_y(nth_tile_global, comptime!(config.smem_config));
+        let tile = ContiguousTilingLayout::<TO>::to_x_y(nth_tile_global, config.smem_config);
 
         SyncFullTilewiseJob::load_and_store_line::<EG, ES, TO>(
             this,
@@ -167,7 +169,7 @@ impl<EG: Numeric, ES: Numeric, TO: TilingOrder>
     }
 
     fn task_count(this: &Self) -> comptime_type!(u32) {
-        comptime!(this.num_lines_per_unit)
+        this.num_lines_per_unit
     }
 }
 
@@ -186,12 +188,12 @@ impl SyncFullTilewiseJob {
         let layout = TiledLayout::new(config.stage_ident, config.smem_config);
         let view = global_iter.view().view(layout);
 
-        let line_read = view.read_checked((tile, line_index_within_tile * this.line_size));
+        let line_read = view.read_checked((tile, line_index_within_tile * this.line_size as u32));
 
         let offset = this.num_lines_to_skip + line_index_within_tile + num_lines_to_skip_local;
         let type_size = type_size::<ES>(this.line_size);
         let offset = stage.swizzle.apply(offset, type_size);
 
-        stage.as_slice_mut(this.line_size)[offset] = Line::cast_from(line_read);
+        stage.as_slice_mut(this.line_size)[offset as usize] = Line::cast_from(line_read);
     }
 }

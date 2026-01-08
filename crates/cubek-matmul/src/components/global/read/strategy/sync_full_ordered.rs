@@ -10,7 +10,7 @@ use crate::definition::InvalidConfigError;
 use crate::definition::MatmulElems;
 use crate::definition::MatmulProblem;
 use crate::definition::StageIdent;
-use cubecl::prelude::*;
+use cubecl::{ir::DeviceProperties, prelude::*};
 
 use super::{LoadingValidation, sync_full_tilewise};
 
@@ -26,7 +26,10 @@ use super::{LoadingValidation, sync_full_tilewise};
 pub struct SyncFullOrderedLoading {}
 
 impl LoadingValidation for SyncFullOrderedLoading {
-    fn validate_with_config(config: &GlobalReaderConfig) -> Result<(), InvalidConfigError> {
+    fn validate_with_config(
+        _device_props: &DeviceProperties,
+        config: &GlobalReaderConfig,
+    ) -> Result<(), InvalidConfigError> {
         if config.stage_ident != StageIdent::Lhs {
             return Err(FormattedConfigError::new(move || {
                 "Ordered loading only available on Lhs".to_string()
@@ -45,14 +48,14 @@ impl LoadingValidation for SyncFullOrderedLoading {
             }));
         }
 
-        let num_tiles_per_plane = comptime!(num_tiles / num_planes);
-        let num_lines_per_tile = comptime!(config.smem_config.elements_per_tile() / line_size);
+        let num_tiles_per_plane = num_tiles / num_planes;
+        let num_lines_per_tile = config.smem_config.elements_per_tile() / line_size as u32;
         let num_lines_per_plane = num_lines_per_tile * num_tiles_per_plane;
         let num_planes = config.loading_planes_count();
         let plane_dim = config.plane_dim;
         let rows_per_plane = config.smem_config.tiles_per_stage_along_row() / num_planes;
 
-        if num_lines_per_plane % plane_dim != 0 {
+        if !num_lines_per_plane.is_multiple_of(plane_dim) {
             return Err(FormattedConfigError::new(move || {
                 format!(
                     "Plane dimension {plane_dim:?} must divide number of lines per plane {num_lines_per_plane:?} for ordered loading.",
@@ -88,7 +91,7 @@ impl LoadMaxRoundPlaneCount for SyncFullOrderedLoading {
     fn max_round_plane_count(
         _elements_per_tile: u32,
         tiles_per_stage: u32,
-        _line_size: u8,
+        _line_size: LineSize,
         _plane_dim: u32,
         _dtype: StorageType,
     ) -> u32 {
@@ -103,15 +106,15 @@ impl FullLoadingStrategy for SyncFullOrderedLoading {
     type Job<EG: Numeric, ES: Numeric> = sync_full_tilewise::SyncFullTilewiseJob;
 
     fn new_job<EG: Numeric, ES: Numeric>(
-        #[comptime] line_size: u32,
+        #[comptime] line_size: LineSize,
         #[comptime] config: GlobalReaderConfig,
     ) -> Self::Job<EG, ES> {
         let num_planes = config.loading_planes_count();
         let num_tiles = config.smem_config.tiles_per_stage();
         let plane_dim = config.plane_dim;
 
-        let num_tiles_per_plane = comptime!(num_tiles / num_planes);
-        let num_lines_per_tile = comptime!(config.smem_config.elements_per_tile() / line_size);
+        let num_tiles_per_plane = num_tiles / num_planes;
+        let num_lines_per_tile = config.smem_config.elements_per_tile() / line_size as u32;
         let num_lines_per_plane = num_lines_per_tile * num_tiles_per_plane;
         let num_lines_per_unit = num_lines_per_plane / plane_dim;
 

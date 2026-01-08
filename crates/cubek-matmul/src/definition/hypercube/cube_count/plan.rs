@@ -83,8 +83,10 @@ impl CubeCountPlan {
                 num_sms,
                 sm_usage,
             } => {
-                let (num_sms_used, cubes_per_sm) =
-                    sm_usage.allocate(num_sms, m_cubes * n_cubes * batch_cubes);
+                let (num_sms_used, cubes_per_sm) = sm_usage.allocate(
+                    num_sms,
+                    m_cubes as usize * n_cubes as usize * batch_cubes as usize,
+                );
 
                 if (cubes_per_sm >= if cubes_first { max_x } else { max_y })
                     || (num_sms_used >= if cubes_first { max_y } else { max_x })

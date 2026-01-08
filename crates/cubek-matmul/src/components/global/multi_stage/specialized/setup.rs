@@ -17,7 +17,7 @@ use crate::definition::TilingBlueprint;
 use crate::definition::{MatmulElems, MatmulSetupError};
 use crate::definition::{MatmulPrecision, MatmulProblem};
 use crate::definition::{MatrixLayout, StageIdent};
-use cubecl::prelude::*;
+use cubecl::{ir::DeviceProperties, prelude::*};
 use std::marker::PhantomData;
 
 /// Double buffering matmul family for any precision
@@ -51,6 +51,7 @@ where
     type Config = SharedGlobalMatmulConfig<SMM::Config>;
 
     fn expand_config(
+        device_props: &DeviceProperties,
         blueprint: &TilingBlueprint,
         dtypes: &MatmulElems,
         line_sizes: &MatmulLineSizes,
@@ -60,6 +61,7 @@ where
             .as_plane_flow_config(plane_dim)?;
 
         let stage_config = SMM::expand_config(
+            device_props,
             blueprint,
             plane_flow_config,
             (2, 2).into(),
@@ -72,7 +74,7 @@ where
         let reader_mode = blueprint.reader_mode;
 
         let lhs_gmem_config = GlobalMemoryConfig {
-            line_size: line_sizes.lhs as u32,
+            line_size: line_sizes.lhs,
             check_row_bounds: blueprint.check_m_bounds,
             check_col_bounds: blueprint.check_k_bounds,
             matrix_layout: blueprint.lhs_layout,
@@ -81,7 +83,7 @@ where
         };
 
         let rhs_gmem_config = GlobalMemoryConfig {
-            line_size: line_sizes.rhs as u32,
+            line_size: line_sizes.rhs,
             check_row_bounds: blueprint.check_k_bounds,
             check_col_bounds: blueprint.check_n_bounds,
             matrix_layout: blueprint.rhs_layout,
@@ -90,7 +92,7 @@ where
         };
 
         let out_gmem_config = GlobalMemoryConfig {
-            line_size: line_sizes.out as u32,
+            line_size: line_sizes.out,
             matrix_layout: MatrixLayout::RowMajor,
             check_row_bounds: blueprint.check_m_bounds,
             check_col_bounds: blueprint.check_n_bounds,

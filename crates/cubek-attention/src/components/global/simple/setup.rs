@@ -55,7 +55,7 @@ impl<
         let plane_flow_config = PlaneFlowConfig::new_unspecialized(stage_config.num_planes());
 
         let query_gmem_config = GlobalMemoryConfig {
-            line_size: blueprint.line_sizes.query as u32,
+            line_size: blueprint.line_sizes.query,
             check_row_bounds: blueprint.check_bounds.seq_q,
             check_col_bounds: blueprint.check_bounds.head_dim,
             matrix_layout: MatrixLayout::RowMajor,
@@ -64,7 +64,7 @@ impl<
         };
 
         let mask_gmem_config = GlobalMemoryConfig {
-            line_size: blueprint.line_sizes.mask as u32,
+            line_size: blueprint.line_sizes.mask,
             check_row_bounds: blueprint.check_bounds.seq_q,
             check_col_bounds: blueprint.check_bounds.seq_kv,
             matrix_layout: MatrixLayout::RowMajor,
@@ -73,7 +73,7 @@ impl<
         };
 
         let key_gmem_config = GlobalMemoryConfig {
-            line_size: blueprint.line_sizes.key as u32,
+            line_size: blueprint.line_sizes.key,
             check_row_bounds: blueprint.check_bounds.seq_kv,
             check_col_bounds: blueprint.check_bounds.head_dim,
             matrix_layout: MatrixLayout::RowMajor,
@@ -82,7 +82,7 @@ impl<
         };
 
         let value_gmem_config = GlobalMemoryConfig {
-            line_size: blueprint.line_sizes.value as u32,
+            line_size: blueprint.line_sizes.value,
             check_row_bounds: blueprint.check_bounds.seq_kv,
             check_col_bounds: blueprint.check_bounds.val_dim,
             matrix_layout: MatrixLayout::RowMajor,
@@ -91,7 +91,7 @@ impl<
         };
 
         let out_gmem_config = GlobalMemoryConfig {
-            line_size: blueprint.line_sizes.out as u32,
+            line_size: blueprint.line_sizes.out,
             check_row_bounds: blueprint.check_bounds.seq_q,
             check_col_bounds: blueprint.check_bounds.val_dim,
             matrix_layout: MatrixLayout::RowMajor,

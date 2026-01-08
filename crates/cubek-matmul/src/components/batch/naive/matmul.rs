@@ -49,12 +49,14 @@ pub(crate) fn matmul_entry<
     let line_size_rhs = Args::view_rhs(&state).line_size();
     let line_size_out = Args::view_out(&mut state).line_size();
     let line_sizes = comptime!(MatmulLineSizes {
-        lhs: line_size_lhs as u8,
-        rhs: line_size_rhs as u8,
-        out: line_size_out as u8,
+        lhs: line_size_lhs,
+        rhs: line_size_rhs,
+        out: line_size_out,
     });
 
+    let device_props = comptime::device_properties();
     let config = comptime!(NaiveBatchMatmulFamily::expand_config(
+        &device_props,
         &blueprint,
         &MatmulElems::from_define_arrays(global, stage, register),
         &line_sizes
@@ -103,7 +105,7 @@ impl<MP: MatmulPrecision> BatchMatmul<MP> for NaiveMatmul<MP> {
 
         let m = ABSOLUTE_POS_X;
         let n = ABSOLUTE_POS_Y;
-        let batch = ABSOLUTE_POS_Z;
+        let batch = ABSOLUTE_POS_Z as usize;
 
         let lhs_batch = Args::batch_lhs(state, batch);
         let lhs = lhs.view(SliceIndex::new(lhs_batch, lhs.shape()));
@@ -119,7 +121,7 @@ impl<MP: MatmulPrecision> BatchMatmul<MP> for NaiveMatmul<MP> {
         let line_size = comptime![Ord::max(lhs.line_size(), rhs.line_size())];
         let mut sum = Line::empty(line_size).fill(<AccG<MP> as Numeric>::from_int(0));
 
-        for k in range_stepped(0u32, k, line_size) {
+        for k in range_stepped(0u32, k, line_size as u32) {
             let lhs = load_unrolled(&lhs, (m, k), MatrixLayout::RowMajor, line_size);
             let rhs = load_unrolled(&rhs, (k, n), MatrixLayout::ColMajor, line_size);
 
@@ -128,19 +130,19 @@ impl<MP: MatmulPrecision> BatchMatmul<MP> for NaiveMatmul<MP> {
             );
         }
 
-        let unroll_sum = line_size != 1u32;
+        let unroll_sum = line_size != 1usize;
         if unroll_sum {
             let mut accum = <AccG<MP> as Numeric>::from_int(0);
             // we unroll the loop to sum `vectorization_factor` elements at once, which lets us
             // use SIMD instructions to speed up the computation
             #[unroll]
-            for v in 0u32..line_size {
+            for v in 0..line_size {
                 accum += sum[v];
             }
 
-            out[(m, n)] = Line::empty(1u32).fill(accum);
+            out[(m, n)] = Line::empty(1usize).fill(accum);
         } else {
-            out[(m, n)] = Line::empty(1u32).fill(sum[0u32]);
+            out[(m, n)] = Line::empty(1usize).fill(sum[0]);
         }
     }
 }
@@ -150,17 +152,17 @@ fn load_unrolled<I: Numeric>(
     view: &View<Line<I>, Coords2d>,
     pos: Coords2d,
     #[comptime] layout: MatrixLayout,
-    #[comptime] line_size: u32,
+    #[comptime] line_size: LineSize,
 ) -> Line<I> {
     comptime![assert!(line_size >= view.line_size())];
     let view_line_size = view.line_size();
-    if comptime![view.line_size() == line_size] {
+    if view.line_size().comptime() == line_size {
         view[pos]
     } else {
         let (row, col) = pos;
         let mut out = Line::empty(line_size);
         #[unroll]
-        for i in range_stepped(0, line_size, view_line_size) {
+        for i in range_stepped(0, line_size as u32, view_line_size as u32) {
             let pos = match layout {
                 MatrixLayout::RowMajor => (row, col + i),
                 MatrixLayout::ColMajor => (row + i, col),
@@ -168,7 +170,7 @@ fn load_unrolled<I: Numeric>(
             let value = view[pos];
             #[unroll]
             for n in 0..view_line_size {
-                out[i + n] = value[n];
+                out[i as usize + n] = value[n];
             }
         }
         out

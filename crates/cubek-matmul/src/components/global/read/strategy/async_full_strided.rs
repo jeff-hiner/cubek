@@ -11,9 +11,9 @@ use crate::components::stage::StridedStageFamily;
 use crate::components::stage::{StridedStageMemory, StridedTilingLayout};
 use crate::components::{global::memory::GlobalIterator, stage::TilingValidation};
 use crate::definition::{InvalidConfigError, MatmulElems, MatmulProblem, StageIdent};
-use cubecl::prelude::barrier::Barrier;
 use cubecl::prelude::*;
 use cubecl::std::tensor::layout::{Layout, LayoutExpand};
+use cubecl::{ir::DeviceProperties, prelude::barrier::Barrier};
 
 use super::{LoadingJob, LoadingValidation};
 
@@ -23,7 +23,10 @@ use super::{LoadingJob, LoadingValidation};
 pub struct AsyncFullStridedLoading {}
 
 impl LoadingValidation for AsyncFullStridedLoading {
-    fn validate_with_config(config: &GlobalReaderConfig) -> Result<(), InvalidConfigError> {
+    fn validate_with_config(
+        device_props: &DeviceProperties,
+        config: &GlobalReaderConfig,
+    ) -> Result<(), InvalidConfigError> {
         let line_size = ASYNC_COPY_WIDTH / config.smem_config.dtype.size_bits() as u32;
 
         // Needs separate check because copy size may be larger than global line size
@@ -45,9 +48,13 @@ impl LoadingValidation for AsyncFullStridedLoading {
             )));
         }
 
-        validate_async_barrier()?;
+        validate_async_barrier(device_props)?;
         validate_swizzle_atom_size(config.smem_config)?;
-        validate_async_copy(&config.gmem_config.dtype, &config.smem_config.dtype)?;
+        validate_async_copy(
+            device_props,
+            &config.gmem_config.dtype,
+            &config.smem_config.dtype,
+        )?;
         StridedTilingLayout::check(config.smem_config)?;
 
         Ok(())
@@ -66,7 +73,7 @@ impl LoadMaxRoundPlaneCount for AsyncFullStridedLoading {
     fn max_round_plane_count(
         elements_per_tile: u32,
         tiles_per_stage: u32,
-        _line_size: u8,
+        _line_size: LineSize,
         plane_dim: u32,
         dtype: StorageType,
     ) -> u32 {
@@ -84,14 +91,14 @@ impl FullLoadingStrategy for AsyncFullStridedLoading {
     type Job<EG: Numeric, ES: Numeric> = AsyncFullStridedJob;
 
     fn new_job<EG: Numeric, ES: Numeric>(
-        #[comptime] _line_size: u32,
+        #[comptime] _line_size: LineSize,
         #[comptime] config: GlobalReaderConfig,
     ) -> Self::Job<EG, ES> {
-        let type_size = ES::type_size_bits();
-        let line_size = comptime![ASYNC_COPY_WIDTH / type_size];
+        let type_size = ES::type_size_bits().comptime();
+        let line_size = ASYNC_COPY_WIDTH / type_size as u32;
         let num_stage_lines = config.smem_config.elements_per_stage() / line_size;
         let unit_count = config.loading_planes_count() * config.plane_dim;
-        let num_tasks_per_unit = comptime!(num_stage_lines / unit_count);
+        let num_tasks_per_unit = num_stage_lines / unit_count;
 
         let unit_position_base = PlaneFlowPartition::new(config.plane_flow_config.partition_rule)
             .load_index(config.input_load_flow)
@@ -136,11 +143,11 @@ impl<EG: Numeric, ES: Numeric> LoadingJob<EG, ES, StridedTilingLayout, AsyncCopy
         let unit_position = this.unit_position_base + task_id * this.unit_count;
         let unit_position_abs = unit_position * this.copy_line_size;
 
-        let layout = FullStageLayout::new(comptime![config.smem_config]);
+        let layout = FullStageLayout::new(config.smem_config);
         let view = global_iter.view();
 
         let pos = layout.to_source_pos(unit_position_abs);
-        let stage_offset = unit_position_abs / stage.smem.line_size();
+        let stage_offset = unit_position_abs / stage.smem.line_size() as u32;
 
         async_copy_from(view, pos, stage, stage_offset, config, this.copy_line_size);
     }

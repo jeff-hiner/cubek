@@ -124,7 +124,7 @@ impl PlaneFlowConfig {
 impl PlaneFlowPartition {
     /// Make a cube role rule from comptime config
     pub fn new(#[comptime] comptime_rule: PlaneFlowPartitionRule) -> PlaneFlowPartition {
-        match comptime!(comptime_rule) {
+        match comptime_rule {
             PlaneFlowPartitionRule::MainFlowOnly => PlaneFlowPartition::new_MainFlowOnly(),
             PlaneFlowPartitionRule::LoadOnlyFirst { load_only } => {
                 PlaneFlowPartition::new_LoadOnlyFirst(PartitionThreshold {
@@ -171,7 +171,7 @@ impl PlaneFlowPartition {
     /// Only used with TMA, so has some CUDA optimizations. `plane_broadcast` and `plane_elect`
     /// ensure the compiler recognizes the values as warp uniform.
     pub fn elect_load_leader(self) -> bool {
-        let plane_id = plane_broadcast(UNIT_POS_Y, 0);
+        let plane_id = plane_broadcast(UNIT_POS_Y, 0u32);
 
         let is_elected_plane = match self {
             PlaneFlowPartition::MainFlowOnly | PlaneFlowPartition::LoadOnlyFirst(_) => {
@@ -197,7 +197,7 @@ impl PlaneFlowPartition {
     /// Only used in specialized, so has some CUDA optimizations. `plane_broadcast` ensure the
     /// compiler recognizes the values as warp uniform.
     pub fn is_compute_plane(self) -> bool {
-        let plane_id = plane_broadcast(UNIT_POS_Y, 0);
+        let plane_id = plane_broadcast(UNIT_POS_Y, 0u32);
 
         match self {
             PlaneFlowPartition::MainFlowOnly => true,
