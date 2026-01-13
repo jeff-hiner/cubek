@@ -97,12 +97,9 @@ impl MatmulProblem {
     ) -> Self {
         fn broadcast_batches(lhs: &[usize], rhs: &[usize]) -> Option<Vec<usize>> {
             let max_len = max(lhs.len(), rhs.len());
-            let lhs_padded = std::iter::repeat(1)
-                .take(max_len - lhs.len())
-                .chain(lhs.iter().cloned());
-            let rhs_padded = std::iter::repeat(1)
-                .take(max_len - rhs.len())
-                .chain(rhs.iter().cloned());
+            let lhs_padded = std::iter::repeat_n(1, max_len - lhs.len()).chain(lhs.iter().cloned());
+
+            let rhs_padded = std::iter::repeat_n(1, max_len - rhs.len()).chain(rhs.iter().cloned());
 
             lhs_padded
                 .zip(rhs_padded)
@@ -131,9 +128,9 @@ impl MatmulProblem {
             m,
             n,
             k,
-            lhs_batches: lhs_batches,
-            rhs_batches: rhs_batches,
-            out_batches: out_batches,
+            lhs_batches,
+            rhs_batches,
+            out_batches,
             lhs_shape,
             rhs_shape,
             out_shape,
