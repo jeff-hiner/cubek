@@ -1,10 +1,9 @@
-use cubecl::prelude::*;
-use half::{bf16, f16};
-
 use crate::{
     definition::{AccumulatorPrecision, AttentionGlobalTypes},
     launch::{AttentionArgs, TensorArgs},
 };
+use cubecl::prelude::*;
+use half::{bf16, f16};
 
 /// Attention spec defining each element types used in the computation as well as
 /// how the arguments are passed to the kernel.
@@ -26,11 +25,19 @@ impl<AP: AttentionPrecision> AttentionSpec for AP {
 }
 
 pub trait QueryPrecision: Send + Sync + Copy + 'static {
-    type Global: Float;
-    type Tile: Float;
+    type Global: Numeric;
+    type Tile: Numeric;
 }
 
+/// Precision for staged matrices (Key, Value) that may be quantized (e.g., INT8).
+/// For INT8 SageAttention, Global is still f32 (loaded from f32 tensors), but Stage can be i8.
 pub trait StagedMatrixPrecision: Send + Sync + Copy + 'static {
+    type Global: Numeric;
+    type Stage: Numeric;
+}
+
+/// Precision for output matrices. Always Float since attention output is floating-point.
+pub trait OutputPrecision: Send + Sync + Copy + 'static {
     type Global: Float;
     type Stage: Float;
 }
@@ -39,11 +46,18 @@ pub trait AttentionPrecision: Send + Sync + Copy + 'static {
     type Query: QueryPrecision;
     type Key: StagedMatrixPrecision;
     type Value: StagedMatrixPrecision;
-    type KVTile: Float;
+    /// The element type used for Key and Value tiles in CMMA operations.
+    /// For float attention this is the same as the K/V stage type.
+    /// For INT8 attention this is i8 (with separate scale factors).
+    type KVTile: Numeric;
+    /// The CMMA accumulator type for Q·K^T score computation.
+    /// For float attention: same as Softmax (e.g., f32).
+    /// For INT8 CMMA: i32 (then converted to Softmax type after dequantization).
+    type ScoreAccumulator: Numeric;
     type Softmax: Float;
     type Accumulator: Float;
     type Mask: Numeric;
-    type Out: StagedMatrixPrecision;
+    type Out: OutputPrecision;
 }
 
 impl QueryPrecision for f16 {
@@ -71,7 +85,7 @@ impl QueryPrecision for f64 {
     type Tile = f32;
 }
 
-impl<G: Float, T: Float> QueryPrecision for (G, T) {
+impl<G: Numeric, T: Numeric> QueryPrecision for (G, T) {
     type Global = G;
     type Tile = T;
 }
@@ -101,7 +115,37 @@ impl StagedMatrixPrecision for f64 {
     type Stage = f32;
 }
 
-impl<G: Float, S: Float> StagedMatrixPrecision for (G, S) {
+impl<G: Numeric, S: Numeric> StagedMatrixPrecision for (G, S) {
+    type Global = G;
+    type Stage = S;
+}
+
+impl OutputPrecision for f16 {
+    type Global = f16;
+    type Stage = f16;
+}
+
+impl OutputPrecision for bf16 {
+    type Global = bf16;
+    type Stage = bf16;
+}
+
+impl OutputPrecision for flex32 {
+    type Global = f32;
+    type Stage = f16;
+}
+
+impl OutputPrecision for f32 {
+    type Global = f32;
+    type Stage = f32;
+}
+
+impl OutputPrecision for f64 {
+    type Global = f64;
+    type Stage = f32;
+}
+
+impl<G: Float, S: Float> OutputPrecision for (G, S) {
     type Global = G;
     type Stage = S;
 }
@@ -112,9 +156,13 @@ impl AttentionPrecision for f16 {
     type Value = f16;
     type KVTile = f16;
     #[cfg(target_os = "macos")]
+    type ScoreAccumulator = f16;
+    #[cfg(target_os = "macos")]
     type Softmax = f16;
     #[cfg(target_os = "macos")]
     type Accumulator = f16;
+    #[cfg(not(target_os = "macos"))]
+    type ScoreAccumulator = f32;
     #[cfg(not(target_os = "macos"))]
     type Softmax = f32;
     #[cfg(not(target_os = "macos"))]
@@ -129,9 +177,13 @@ impl AttentionPrecision for flex32 {
     type Value = flex32;
     type KVTile = f16;
     #[cfg(target_os = "macos")]
+    type ScoreAccumulator = f16;
+    #[cfg(target_os = "macos")]
     type Softmax = f16;
     #[cfg(target_os = "macos")]
     type Accumulator = f16;
+    #[cfg(not(target_os = "macos"))]
+    type ScoreAccumulator = f32;
     #[cfg(not(target_os = "macos"))]
     type Softmax = f32;
     #[cfg(not(target_os = "macos"))]
@@ -146,9 +198,13 @@ impl AttentionPrecision for bf16 {
     type Value = bf16;
     type KVTile = bf16;
     #[cfg(target_os = "macos")]
+    type ScoreAccumulator = bf16;
+    #[cfg(target_os = "macos")]
     type Softmax = bf16;
     #[cfg(target_os = "macos")]
     type Accumulator = bf16;
+    #[cfg(not(target_os = "macos"))]
+    type ScoreAccumulator = f32;
     #[cfg(not(target_os = "macos"))]
     type Softmax = f32;
     #[cfg(not(target_os = "macos"))]
@@ -162,6 +218,7 @@ impl AttentionPrecision for f32 {
     type Key = f32;
     type Value = f32;
     type KVTile = f32;
+    type ScoreAccumulator = f32;
     type Softmax = f32;
     type Accumulator = f32;
     type Mask = u8;
@@ -173,31 +230,68 @@ impl AttentionPrecision for f64 {
     type Key = f64;
     type Value = f64;
     type KVTile = f32;
+    type ScoreAccumulator = f32;
     type Softmax = f32;
     type Accumulator = f32;
     type Mask = u8;
     type Out = f64;
 }
 
+/// Marker type for INT8 CMMA attention precision.
+///
+/// This precision type enables hardware-accelerated INT8 CMMA (Cooperative Matrix Multiply-Accumulate)
+/// for the Q·K^T score computation in SageAttention:
+/// - Q and K are quantized to i8 with per-row scale factors
+/// - CMMA computes i8 × i8 → i32 accumulator
+/// - Scores are dequantized to f32 for softmax
+/// - V remains f32, accumulated with f32 precision
+/// - Output is f32
+///
+/// This matches the parallelism of reference implementations like Triton's `tl.dot()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Int8Cmma;
+
+impl AttentionPrecision for Int8Cmma {
+    // Q: loaded as f32, quantized on-the-fly to i8 tiles
+    type Query = (f32, i8);
+    // K: loaded as f32, quantized on-the-fly to i8 stage/tiles
+    type Key = (f32, i8);
+    // V: stays f32 throughout (softmax × V requires float)
+    type Value = (f32, f32);
+    /// i8 for K tiles in CMMA Q·K^T
+    type KVTile = i8;
+    /// i32 accumulator for INT8 CMMA (i8 × i8 → i32)
+    type ScoreAccumulator = i32;
+    /// f32 for softmax computation (after dequantization from i32)
+    type Softmax = f32;
+    /// f32 for output accumulation
+    type Accumulator = f32;
+    type Mask = u8;
+    /// Output is f32
+    type Out = f32;
+}
+
 impl<
-    QG: Float,
-    QT: Float,
-    KG: Float,
-    KS: Float,
-    VG: Float,
-    VS: Float,
-    KVT: Float,
+    QG: Numeric,
+    QT: Numeric,
+    KG: Numeric,
+    KS: Numeric,
+    VG: Numeric,
+    VS: Numeric,
+    KVT: Numeric,
+    SACC: Numeric,
     SM: Float,
     ACC: Float,
     MSK: Numeric,
     OG: Float,
     OS: Float,
-> AttentionPrecision for (QG, QT, KG, KS, VG, VS, KVT, SM, ACC, MSK, OG, OS)
+> AttentionPrecision for (QG, QT, KG, KS, VG, VS, KVT, SACC, SM, ACC, MSK, OG, OS)
 {
     type Query = (QG, QT);
     type Key = (KG, KS);
     type Value = (VG, VS);
     type KVTile = KVT;
+    type ScoreAccumulator = SACC;
     type Softmax = SM;
     type Accumulator = ACC;
     type Mask = MSK;
@@ -211,11 +305,11 @@ pub type InputArg<AA> = <AA as AttentionArgs>::Input<
     NumericExpand<0>,
     NumericExpand<2>,
     NumericExpand<4>,
-    NumericExpand<9>,
+    NumericExpand<10>,
 >;
 
 /// Output argument
-pub type OutputArg<AA> = <AA as AttentionArgs>::Output<NumericExpand<10>>;
+pub type OutputArg<AA> = <AA as AttentionArgs>::Output<NumericExpand<11>>;
 
 /// Input runtime argument
 pub type InputRuntimeArg<'a, AA, R> = <InputArg<AA> as LaunchArg>::RuntimeArg<'a, R>;
@@ -225,7 +319,7 @@ pub type OutputRuntimeArg<'a, AA, R> = <OutputArg<AA> as LaunchArg>::RuntimeArg<
 
 pub mod attention_types {
     use crate::definition::{
-        AttentionPrecision, AttentionSpec, QueryPrecision, StagedMatrixPrecision,
+        AttentionPrecision, AttentionSpec, OutputPrecision, QueryPrecision, StagedMatrixPrecision,
     };
 
     pub type QG<AS> =
@@ -242,12 +336,17 @@ pub mod attention_types {
     <<<AS as AttentionSpec>::Precision as AttentionPrecision>::Value as StagedMatrixPrecision>::Stage;
 
     pub type KVT<AS> = <<AS as AttentionSpec>::Precision as AttentionPrecision>::KVTile;
+    /// CMMA accumulator type for Q·K^T score computation.
+    /// For float attention: same as SM. For INT8 CMMA: i32.
+    pub type SACC<AS> = <<AS as AttentionSpec>::Precision as AttentionPrecision>::ScoreAccumulator;
     pub type SM<AS> = <<AS as AttentionSpec>::Precision as AttentionPrecision>::Softmax;
     pub type ACC<AS> = <<AS as AttentionSpec>::Precision as AttentionPrecision>::Accumulator;
     pub type MSK<AS> = <<AS as AttentionSpec>::Precision as AttentionPrecision>::Mask;
 
-    pub type OG<AS> = <<<AS as AttentionSpec>::Precision as AttentionPrecision>::Out as StagedMatrixPrecision>::Global;
-    pub type OS<AS> = <<<AS as AttentionSpec>::Precision as AttentionPrecision>::Out as StagedMatrixPrecision>::Stage;
+    pub type OG<AS> =
+        <<<AS as AttentionSpec>::Precision as AttentionPrecision>::Out as OutputPrecision>::Global;
+    pub type OS<AS> =
+        <<<AS as AttentionSpec>::Precision as AttentionPrecision>::Out as OutputPrecision>::Stage;
 }
 
 pub type Args<MS> = <MS as AttentionSpec>::Args;
@@ -261,6 +360,8 @@ pub struct AttentionElems {
     pub value_global: StorageType,
     pub value_stage: StorageType,
     pub key_value_tile: StorageType,
+    /// CMMA accumulator type for Q·K^T. For float: same as softmax. For INT8: i32.
+    pub score_accumulator: StorageType,
     pub softmax: StorageType,
     pub accumulator: StorageType,
     pub mask: StorageType,
@@ -286,6 +387,8 @@ impl AttentionElems {
             value_global: global_dtypes.value,
             value_stage: global_dtypes.value,
             key_value_tile: global_dtypes.value,
+            // For standard float attention, score_accumulator matches softmax type
+            score_accumulator: accumulator,
             softmax: accumulator,
             accumulator,
             mask: global_dtypes.mask,
@@ -294,7 +397,7 @@ impl AttentionElems {
         }
     }
 
-    pub fn from_define_array(elem_types: [StorageType; 12]) -> AttentionElems {
+    pub fn from_define_array(elem_types: [StorageType; 13]) -> AttentionElems {
         AttentionElems {
             query_global: elem_types[0],
             query_tile: elem_types[1],
@@ -303,16 +406,17 @@ impl AttentionElems {
             value_global: elem_types[4],
             value_stage: elem_types[5],
             key_value_tile: elem_types[6],
-            softmax: elem_types[7],
-            accumulator: elem_types[8],
-            mask: elem_types[9],
-            out_global: elem_types[10],
-            out_stage: elem_types[11],
+            score_accumulator: elem_types[7],
+            softmax: elem_types[8],
+            accumulator: elem_types[9],
+            mask: elem_types[10],
+            out_global: elem_types[11],
+            out_stage: elem_types[12],
         }
     }
 }
 
-impl From<&AttentionElems> for [StorageType; 12] {
+impl From<&AttentionElems> for [StorageType; 13] {
     fn from(elems: &AttentionElems) -> Self {
         [
             elems.query_global,
@@ -322,6 +426,7 @@ impl From<&AttentionElems> for [StorageType; 12] {
             elems.value_global,
             elems.value_stage,
             elems.key_value_tile,
+            elems.score_accumulator,
             elems.softmax,
             elems.accumulator,
             elems.mask,

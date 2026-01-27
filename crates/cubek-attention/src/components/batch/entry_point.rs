@@ -1,18 +1,13 @@
-use crate::components::batch::BatchAttentionFamily;
-use crate::components::batch::base::BatchAttention;
-use crate::definition::AttentionBlueprint;
-use crate::definition::AttentionElems;
-use crate::definition::CubeCountInput;
-use crate::launch::AttentionArgs;
-use crate::launch::TensorKey;
-use crate::launch::TensorMask;
-use crate::launch::TensorOutput;
-use crate::launch::TensorQuery;
-use crate::launch::TensorValue;
-use cubecl;
-use cubecl::prelude::*;
-use cubecl::std::tensor::r#virtual::VirtualTensor;
-use cubecl::std::{CubeOption, CubeOptionExpand};
+use crate::{
+    components::batch::{BatchAttentionFamily, base::BatchAttention},
+    definition::{AttentionBlueprint, AttentionElems, CubeCountInput},
+    launch::{AttentionArgs, TensorKey, TensorMask, TensorOutput, TensorQuery, TensorValue},
+};
+use cubecl::{
+    self,
+    prelude::*,
+    std::{CubeOption, CubeOptionExpand, tensor::r#virtual::VirtualTensor},
+};
 
 type Input<Args, QG, KG, VG, MSK> = <Args as AttentionArgs>::Input<QG, KG, VG, MSK>;
 type Output<Args, OG> = <Args as AttentionArgs>::Output<OG>;
@@ -21,13 +16,14 @@ type Output<Args, OG> = <Args as AttentionArgs>::Output<OG>;
 /// Launches the attention kernel
 pub(crate) fn attention<
     Args: AttentionArgs,
-    QG: Float,
-    QT: Float,
-    KG: Float,
-    KS: Float,
-    VG: Float,
-    VS: Float,
-    KVT: Float,
+    QG: Numeric,
+    QT: Numeric,
+    KG: Numeric,
+    KS: Numeric,
+    VG: Numeric,
+    VS: Numeric,
+    KVT: Numeric,
+    SACC: Numeric,
     SM: Float,
     ACC: Float,
     MSK: Numeric,
@@ -39,7 +35,8 @@ pub(crate) fn attention<
     output: &mut Output<Args, OG>,
     cube_count_args: CubeCountInput,
     #[comptime] blueprint: AttentionBlueprint,
-    #[define(QG, QT, KG, KS, VG, VS, KVT, SM, ACC, MSK, OG, OS)] elem_types: [StorageType; 12],
+    #[define(QG, QT, KG, KS, VG, VS, KVT, SACC, SM, ACC, MSK, OG, OS)] elem_types: [StorageType;
+        13],
 ) {
     let config = comptime!(BMMF::expand_config(
         blueprint,
@@ -76,7 +73,7 @@ pub(crate) fn attention<
     let out =
         VirtualTensor::<OG, ReadWrite>::new::<TensorOutput<QG, KG, VG, MSK, OG, Args>>(&mut out);
 
-    BMMF::Attention::<(QG, QT, KG, KS, VG, VS, KVT, SM, ACC, MSK, OG, OS)>::execute(
+    BMMF::Attention::<(QG, QT, KG, KS, VG, VS, KVT, SACC, SM, ACC, MSK, OG, OS)>::execute(
         query,
         key,
         value,

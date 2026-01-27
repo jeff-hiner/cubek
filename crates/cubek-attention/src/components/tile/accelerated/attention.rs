@@ -1,14 +1,16 @@
-use cubecl;
-use cubecl::prelude::*;
+use crate::{
+    components::tile::{
+        TileAttention, TileAttentionConfig as _,
+        accelerated::{
+            hybrid_fragment::HybridFragment,
+            local_tile::{LocalTile, LocalTileLayout},
+            setup::BlackboxAcceleratedAttentionMatmulConfig,
+        },
+    },
+    definition::{AttentionPrecision, attention_types::*},
+};
+use cubecl::{self, prelude::*};
 use cubek_matmul::components::tile::StridedTile;
-
-use crate::components::tile::accelerated::hybrid_fragment::HybridFragment;
-use crate::components::tile::accelerated::local_tile::LocalTile;
-use crate::components::tile::accelerated::local_tile::LocalTileLayout;
-use crate::components::tile::accelerated::setup::BlackboxAcceleratedAttentionMatmulConfig;
-use crate::components::tile::{TileAttention, TileAttentionConfig as _};
-use crate::definition::AttentionPrecision;
-use crate::definition::attention_types::*;
 
 /// Uses accelerated instruction, but relies on shared memory for row-dependent computations
 /// because the fragment layout is blackbox
@@ -129,7 +131,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
         cmma::load(fragment, &slice, stride);
     }
 
-    fn load_key_transposed<E: Float>(
+    fn load_key_transposed<E: Numeric>(
         tile: &StridedTile<E>,
         rhs: &mut Self::KeyValue,
         #[comptime] _config: Self::Config,
@@ -138,7 +140,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
         cmma::load(rhs, &slice, stride);
     }
 
-    fn load_value<E: Float>(
+    fn load_value<E: Numeric>(
         tile: &StridedTile<E>,
         rhs: &mut Self::KeyValue,
         #[comptime] _config: Self::Config,

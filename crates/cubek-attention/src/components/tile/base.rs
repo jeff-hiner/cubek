@@ -1,19 +1,16 @@
-use cubecl;
-use cubecl::prelude::*;
-use cubek_matmul::components::CubeDimResource;
-use cubek_matmul::components::tile::StridedTile;
-
-use crate::components::tile::{
-    FragmentAccumulator, FragmentLayout, FragmentMask, FragmentSoftmax, RowwiseFormat,
+use crate::{
+    components::tile::{
+        FragmentAccumulator, FragmentLayout, FragmentMask, FragmentSoftmax, RowwiseFormat,
+    },
+    definition::{
+        AttentionBlueprint, AttentionPrecision, AttentionSetupError, AttentionTileSize,
+        InvalidConfigError,
+        attention_types::{ACC, SM},
+    },
 };
-use crate::definition::attention_types::{ACC, SM};
-use crate::definition::{
-    AttentionBlueprint, AttentionPrecision, AttentionSetupError, AttentionTileSize,
-    InvalidConfigError,
-};
-
-use std::fmt::Debug;
-use std::hash::Hash;
+use cubecl::{self, prelude::*};
+use cubek_matmul::components::{CubeDimResource, tile::StridedTile};
+use std::{fmt::Debug, hash::Hash};
 
 /// Logits below this are considered masked (effectively -inf)
 /// Value chosen to fit within f16 range (~-65,504 max)
@@ -65,12 +62,12 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
 
     fn load_query<E: Numeric>(tile: &StridedTile<E>, fragment: &mut Self::Query);
 
-    fn load_key_transposed<E: Float>(
+    fn load_key_transposed<E: Numeric>(
         tile: &StridedTile<E>,
         fragment: &mut Self::KeyValue,
         #[comptime] config: Self::Config,
     );
-    fn load_value<E: Float>(
+    fn load_value<E: Numeric>(
         tile: &StridedTile<E>,
         fragment: &mut Self::KeyValue,
         #[comptime] config: Self::Config,

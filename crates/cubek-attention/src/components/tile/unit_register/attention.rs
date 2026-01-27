@@ -1,21 +1,14 @@
-use cubecl;
-use cubecl::prelude::*;
-use cubecl::std::tensor::layout::Coords2d;
+use crate::{
+    components::tile::{
+        FragmentAccumulator, FragmentAccumulatorExpand, FragmentLayout, FragmentLayoutExpand,
+        FragmentMask, FragmentMaskExpand, FragmentSoftmax, FragmentSoftmaxExpand, LOGIT_MASKED,
+        RowVal, RowWise, RowwiseFormat, RowwiseFormatExpand, TileAttention,
+        unit_register::setup::UnitTileAttentionConfig,
+    },
+    definition::{AttentionPrecision, attention_types::*},
+};
+use cubecl::{self, prelude::*, std::tensor::layout::Coords2d};
 use cubek_matmul::components::tile::StridedTile;
-
-use crate::components::tile::LOGIT_MASKED;
-use crate::components::tile::RowVal;
-use crate::components::tile::RowWise;
-use crate::components::tile::unit_register::setup::UnitTileAttentionConfig;
-use crate::components::tile::{FragmentAccumulator, FragmentAccumulatorExpand};
-use crate::components::tile::{FragmentMask, FragmentMaskExpand};
-use crate::components::tile::{FragmentSoftmax, FragmentSoftmaxExpand};
-use crate::components::tile::{RowwiseFormat, RowwiseFormatExpand};
-
-use crate::components::tile::TileAttention;
-use crate::components::tile::{FragmentLayout, FragmentLayoutExpand};
-use crate::definition::AttentionPrecision;
-use crate::definition::attention_types::*;
 
 pub struct UnitRegisterTileAttention;
 
@@ -302,7 +295,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
         strided_tile_to_unit_tile(tile, fragment);
     }
 
-    fn load_key_transposed<E: Float>(
+    fn load_key_transposed<E: Numeric>(
         tile: &StridedTile<E>,
         fragment: &mut Self::KeyValue,
         #[comptime] _config: Self::Config,
@@ -310,7 +303,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
         strided_tile_to_transposed_unit_tile(tile, fragment);
     }
 
-    fn load_value<E: Float>(
+    fn load_value<E: Numeric>(
         tile: &StridedTile<E>,
         fragment: &mut Self::KeyValue,
         #[comptime] _config: Self::Config,
@@ -409,7 +402,7 @@ fn unit_tile_to_slice<E: Numeric, E2: Numeric>(
 }
 
 #[cube]
-fn unit_inner_matmul<Lhs: Float, Rhs: Float, Acc: Float>(
+fn unit_inner_matmul<Lhs: Numeric, Rhs: Numeric, Acc: Numeric>(
     lhs: &UnitTile<Lhs>,
     rhs: &UnitTile<Rhs>,
     out: &mut UnitTile<Acc>,
