@@ -1,4 +1,5 @@
 pub mod accelerated;
+pub mod sage;
 pub mod unit_register;
 
 mod base;
