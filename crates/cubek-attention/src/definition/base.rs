@@ -27,6 +27,13 @@ pub enum AttentionIdent {
 pub struct AttentionOptions {
     pub causal: bool,
     pub accumulator_precision: AccumulatorPrecision,
+    /// Enable INT8 CMMA for Q·K^T computation (SageAttention-style).
+    /// When enabled:
+    /// - Q and K tiles are quantized to i8
+    /// - CMMA uses i32 accumulator for Q·K^T
+    /// - Scores are converted to f32 for softmax
+    /// - V stays f32 throughout
+    pub int8_cmma: bool,
 }
 
 impl AttentionProblem {

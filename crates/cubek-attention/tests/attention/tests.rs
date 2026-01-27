@@ -38,6 +38,7 @@ fn one_tile_simple() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
 
@@ -91,6 +92,7 @@ fn one_partition_several_planes() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
 
@@ -146,6 +148,7 @@ fn problem_smaller_than_one_tile_seq_q_seq_kv_val_dim() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -194,6 +197,7 @@ fn head_dim_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -241,6 +245,7 @@ fn two_rows_in_array_tile() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -289,6 +294,7 @@ fn one_tile_seqq16() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -337,6 +343,7 @@ fn one_tile_seqq4() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -384,6 +391,7 @@ fn seqq2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -431,6 +439,7 @@ fn hd2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -478,6 +487,7 @@ fn kv2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -525,6 +535,7 @@ fn vd2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -572,6 +583,7 @@ fn hd2_vd2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -619,6 +631,7 @@ fn all2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -667,6 +680,7 @@ fn global_iterations_2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -715,6 +729,7 @@ fn global_iterations_2_kv2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -763,6 +778,7 @@ fn partition_kv1_global1_with_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -811,6 +827,7 @@ fn partition_seqq2_global2_kv2_global2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -858,6 +875,7 @@ fn partition_many_planes() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -906,6 +924,7 @@ fn partition_kv1_global3_with_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -954,6 +973,7 @@ fn partition_oob_in_q() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1001,6 +1021,7 @@ fn partition_kv2_with_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1095,6 +1116,7 @@ fn partition_kv2_masked() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1142,6 +1164,7 @@ fn stage2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1189,6 +1212,7 @@ fn stage4() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1238,6 +1262,7 @@ fn stage2_problem4() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1285,6 +1310,7 @@ fn reuse_key_value() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1332,6 +1358,7 @@ fn double_row_wise() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1379,6 +1406,7 @@ fn one_tile_masked() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1521,6 +1549,7 @@ fn masked_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1569,6 +1598,7 @@ fn masked_larger() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1616,6 +1646,7 @@ fn num_heads_2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1663,6 +1694,7 @@ fn batch_2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1710,6 +1742,7 @@ fn batch_2_seqq2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1757,6 +1790,7 @@ fn num_heads_2_batch_2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1804,6 +1838,7 @@ fn num_heads_2_masked() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1856,6 +1891,7 @@ fn huge_problem() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);

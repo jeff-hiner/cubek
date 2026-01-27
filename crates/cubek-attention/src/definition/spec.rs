@@ -58,6 +58,10 @@ pub trait AttentionPrecision: Send + Sync + Copy + 'static {
     type Accumulator: Float;
     type Mask: Numeric;
     type Out: OutputPrecision;
+
+    /// Whether score_matmul needs to convert from ScoreAccumulator to Softmax type.
+    /// For float attention: false (both are f32). For INT8 CMMA: true (i32 → f32).
+    const REQUIRES_SCORE_CONVERSION: bool;
 }
 
 impl QueryPrecision for f16 {
@@ -169,6 +173,7 @@ impl AttentionPrecision for f16 {
     type Accumulator = f32;
     type Mask = u8;
     type Out = f16;
+    const REQUIRES_SCORE_CONVERSION: bool = false;
 }
 
 impl AttentionPrecision for flex32 {
@@ -190,6 +195,7 @@ impl AttentionPrecision for flex32 {
     type Accumulator = f32;
     type Mask = u8;
     type Out = f32;
+    const REQUIRES_SCORE_CONVERSION: bool = false;
 }
 
 impl AttentionPrecision for bf16 {
@@ -211,6 +217,7 @@ impl AttentionPrecision for bf16 {
     type Accumulator = f32;
     type Mask = u8;
     type Out = bf16;
+    const REQUIRES_SCORE_CONVERSION: bool = false;
 }
 
 impl AttentionPrecision for f32 {
@@ -223,6 +230,7 @@ impl AttentionPrecision for f32 {
     type Accumulator = f32;
     type Mask = u8;
     type Out = f32;
+    const REQUIRES_SCORE_CONVERSION: bool = false;
 }
 
 impl AttentionPrecision for f64 {
@@ -235,6 +243,7 @@ impl AttentionPrecision for f64 {
     type Accumulator = f32;
     type Mask = u8;
     type Out = f64;
+    const REQUIRES_SCORE_CONVERSION: bool = false;
 }
 
 /// Marker type for INT8 CMMA attention precision.
@@ -269,6 +278,8 @@ impl AttentionPrecision for Int8Cmma {
     type Mask = u8;
     /// Output is f32
     type Out = f32;
+    /// INT8 CMMA needs i32 → f32 conversion after score matmul
+    const REQUIRES_SCORE_CONVERSION: bool = true;
 }
 
 impl<
@@ -296,6 +307,9 @@ impl<
     type Accumulator = ACC;
     type Mask = MSK;
     type Out = (OG, OS);
+    // TODO: For INT8 CMMA via tuple types, this should be true when SACC != SM.
+    // For now, use Int8Cmma type directly for INT8 CMMA attention.
+    const REQUIRES_SCORE_CONVERSION: bool = false;
 }
 
 // TODO make sure the numbers are the right ones
@@ -394,6 +408,44 @@ impl AttentionElems {
             mask: global_dtypes.mask,
             out_global: global_dtypes.out,
             out_stage: global_dtypes.out,
+        }
+    }
+
+    /// Create element types for INT8 CMMA attention (SageAttention-style).
+    ///
+    /// - Q and K are loaded as f32, quantized to i8 tiles
+    /// - CMMA computes i8 × i8 → i32 for Q·K^T
+    /// - Scores are converted to f32 for softmax
+    /// - V stays f32 throughout
+    /// - Output is f32
+    pub fn for_int8_cmma(global_dtypes: &AttentionGlobalTypes) -> AttentionElems {
+        use cubecl::ir::{ElemType, IntKind};
+        let i8_type = StorageType::Scalar(ElemType::Int(IntKind::I8));
+        let i32_type = StorageType::Scalar(ElemType::Int(IntKind::I32));
+        let f32_type = AccumulatorPrecision::default_accumulator_type();
+
+        Self {
+            // Q: loaded as f32, quantized to i8 for CMMA
+            query_global: global_dtypes.query,
+            query_tile: i8_type,
+            // K: loaded as f32, quantized to i8 for CMMA
+            key_global: global_dtypes.key,
+            key_stage: i8_type,
+            // V: stays f32 throughout (softmax × V requires float)
+            value_global: global_dtypes.value,
+            value_stage: f32_type,
+            // K tiles are i8 for Q·K^T CMMA
+            key_value_tile: i8_type,
+            // INT8 CMMA uses i32 accumulator for Q·K^T
+            score_accumulator: i32_type,
+            // Softmax computed in f32 (after dequantization from i32)
+            softmax: f32_type,
+            // Output accumulation in f32
+            accumulator: f32_type,
+            mask: global_dtypes.mask,
+            // Output is f32
+            out_global: f32_type,
+            out_stage: f32_type,
         }
     }
 

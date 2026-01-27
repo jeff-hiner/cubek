@@ -36,6 +36,10 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
 
     fn softmax_layout(#[comptime] config: Self::Config) -> Self::FragmentLayout;
 
+    /// Compute Q·K^T score matrix.
+    ///
+    /// For float attention: directly outputs to Softmax type.
+    /// For INT8 CMMA: CMMA outputs i32, which is converted to f32 internally.
     fn score_matmul(
         lhs: &Self::Query,
         rhs: &Self::KeyValue,

@@ -44,10 +44,35 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
         lhs: &Self::Query,
         rhs: &Self::KeyValue,
         out: &mut Self::Softmax,
-        #[comptime] _config: Self::Config,
+        #[comptime] config: Self::Config,
     ) {
-        let out = &out.fragment;
-        cmma::execute::<QT<AP>, KVT<AP>, SM<AP>, SM<AP>>(lhs, rhs, out, out);
+        // Check if score accumulator type differs from softmax type (INT8 path)
+        // For INT8: SACC=i32, SM=f32 → needs i32 CMMA then cast to f32
+        // For Float: SACC=f32, SM=f32 → direct f32 CMMA
+        let needs_conversion = comptime!(AP::REQUIRES_SCORE_CONVERSION);
+
+        if needs_conversion {
+            // INT8 path: CMMA outputs i32, then cast to f32
+            let size = config.attention_tile_size().to_score_matmul_tile_size();
+            let temp_acc = unsafe {
+                cmma::Matrix::<SACC<AP>>::uninitialized(
+                    cmma::MatrixIdent::Accumulator,
+                    size.m as usize,
+                    size.n as usize,
+                    size.k as usize,
+                    cmma::MatrixLayout::RowMajor,
+                )
+            };
+            cmma::fill(&temp_acc, SACC::<AP>::from_int(0));
+            cmma::execute::<QT<AP>, KVT<AP>, SACC<AP>, SACC<AP>>(lhs, rhs, &temp_acc, &temp_acc);
+
+            // Cast i32 → f32 and store to HybridFragment
+            out.store_from_cmma_matrix(&temp_acc);
+        } else {
+            // Float path: direct CMMA to f32
+            let out_fragment = &out.fragment;
+            cmma::execute::<QT<AP>, KVT<AP>, SM<AP>, SM<AP>>(lhs, rhs, out_fragment, out_fragment);
+        }
     }
 
     fn value_matmul(

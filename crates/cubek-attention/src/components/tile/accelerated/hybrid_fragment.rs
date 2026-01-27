@@ -65,6 +65,25 @@ impl<E: Float> HybridFragment<E> {
     fn zero(&mut self) {
         cmma::fill(&self.fragment, E::from_int(0));
     }
+
+    /// Store scores from an external CMMA matrix (used for INT8 path where CMMA outputs i32).
+    /// The scores are cast from type T to E, stored to shared memory, then loaded into fragment.
+    pub fn store_from_cmma_matrix<T: Numeric>(&mut self, scores: &cmma::Matrix<T>) {
+        let casted = cmma::cast::<T, E>(scores);
+        cmma::store(
+            &mut self.smem_slice,
+            &casted,
+            self.stride,
+            cmma::MatrixLayout::RowMajor,
+        );
+        sync_cube();
+        cmma::load_with_layout(
+            &self.fragment,
+            &self.smem_slice.to_slice(),
+            self.stride,
+            cmma::MatrixLayout::RowMajor,
+        );
+    }
 }
 
 #[cube]

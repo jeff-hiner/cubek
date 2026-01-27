@@ -85,6 +85,7 @@ pub fn test_launch(
         AttentionOptions {
             causal: problem.options.causal,
             accumulator_precision: problem.options.accumulator_precision,
+            int8_cmma: problem.options.int8_cmma,
         },
     )
     .into()
