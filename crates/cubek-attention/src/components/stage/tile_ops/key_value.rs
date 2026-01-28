@@ -4,105 +4,52 @@ use cubecl::prelude::*;
 use crate::components::tile::TileAttention;
 use crate::definition::AttentionPrecision;
 
+/// Key tile fragment for Q·K^T matmul.
 #[derive(CubeType)]
-/// Key and Value inputs to the Tile Attention
-///
-/// Key and Value share the same trait because they may
-/// be the same reused underlying fragment
-pub enum KeyValueTile<AP: AttentionPrecision, TA: TileAttention<AP>> {
-    Reuse(ReuseKV<AP, TA>),
-    Key(Key<AP, TA>),
-    Value(Value<AP, TA>),
+pub struct KeyTile<AP: AttentionPrecision, TA: TileAttention<AP>> {
+    pub fragment: TA::Key,
 }
 
 #[cube]
-impl<AP: AttentionPrecision, TA: TileAttention<AP>> KeyValueTile<AP, TA> {
-    pub fn new_key_value(#[comptime] config: TA::Config) -> Self {
-        Self::new_Reuse(ReuseKV::new(config))
-    }
-
-    pub fn new_key(#[comptime] config: TA::Config) -> Self {
-        Self::new_Key(Key::new(config))
-    }
-
-    pub fn new_value(#[comptime] config: TA::Config) -> Self {
-        Self::new_Value(Value::new(config))
-    }
-
-    /// Get the underlying key as readable
-    pub fn key(&self) -> &TA::KeyValue {
-        match self {
-            KeyValueTile::Reuse(reuse_kv) => &reuse_kv.fragment,
-            KeyValueTile::Key(key) => &key.fragment,
-            KeyValueTile::Value(_) => panic!("Tried to access key on value-only fragment"),
-        }
-    }
-
-    /// Get the underlying key as writable
-    pub fn key_mut(&mut self) -> &mut TA::KeyValue {
-        match self {
-            KeyValueTile::Reuse(reuse_kv) => &mut reuse_kv.fragment,
-            KeyValueTile::Key(key) => &mut key.fragment,
-            KeyValueTile::Value(_) => panic!("Tried to access key on value-only fragment"),
-        }
-    }
-
-    /// Get the underlying value as readable
-    pub fn value(&self) -> &TA::KeyValue {
-        match self {
-            KeyValueTile::Reuse(reuse_kv) => &reuse_kv.fragment,
-            KeyValueTile::Key(_) => panic!("Tried to access value on key-only fragment"),
-            KeyValueTile::Value(value) => &value.fragment,
-        }
-    }
-
-    /// Get the underlying value as writable
-    pub fn value_mut(&mut self) -> &mut TA::KeyValue {
-        match self {
-            KeyValueTile::Reuse(reuse_kv) => &mut reuse_kv.fragment,
-            KeyValueTile::Key(_) => panic!("Tried to access value on key-only fragment"),
-            KeyValueTile::Value(value) => &mut value.fragment,
-        }
-    }
-}
-
-#[derive(CubeType)]
-pub struct ReuseKV<AP: AttentionPrecision, TA: TileAttention<AP>> {
-    pub fragment: TA::KeyValue,
-}
-
-#[cube]
-impl<AP: AttentionPrecision, TA: TileAttention<AP>> ReuseKV<AP, TA> {
+impl<AP: AttentionPrecision, TA: TileAttention<AP>> KeyTile<AP, TA> {
     pub fn new(#[comptime] config: TA::Config) -> Self {
-        let fragment = TA::allocate_key_value(config);
-        ReuseKV::<AP, TA> { fragment }
-    }
-}
-
-#[derive(CubeType)]
-pub struct Key<AP: AttentionPrecision, TA: TileAttention<AP>> {
-    pub fragment: TA::KeyValue,
-}
-
-#[cube]
-impl<AP: AttentionPrecision, TA: TileAttention<AP>> Key<AP, TA> {
-    pub fn new(#[comptime] config: TA::Config) -> Self {
-        Key::<AP, TA> {
+        KeyTile::<AP, TA> {
             fragment: TA::allocate_key(config),
         }
     }
+
+    /// Get the underlying key fragment as readable
+    pub fn key(&self) -> &TA::Key {
+        &self.fragment
+    }
+
+    /// Get the underlying key fragment as writable
+    pub fn key_mut(&mut self) -> &mut TA::Key {
+        &mut self.fragment
+    }
 }
 
+/// Value tile fragment for P×V matmul.
 #[derive(CubeType)]
-pub struct Value<AP: AttentionPrecision, TA: TileAttention<AP>> {
-    pub fragment: TA::KeyValue,
+pub struct ValueTile<AP: AttentionPrecision, TA: TileAttention<AP>> {
+    pub fragment: TA::Value,
 }
 
 #[cube]
-impl<AP: AttentionPrecision, TA: TileAttention<AP>> Value<AP, TA> {
+impl<AP: AttentionPrecision, TA: TileAttention<AP>> ValueTile<AP, TA> {
     pub fn new(#[comptime] config: TA::Config) -> Self {
-        Value::<AP, TA> {
+        ValueTile::<AP, TA> {
             fragment: TA::allocate_value(config),
         }
+    }
+
+    /// Get the underlying value fragment as readable
+    pub fn value(&self) -> &TA::Value {
+        &self.fragment
+    }
+
+    /// Get the underlying value fragment as writable
+    pub fn value_mut(&mut self) -> &mut TA::Value {
+        &mut self.fragment
     }
 }

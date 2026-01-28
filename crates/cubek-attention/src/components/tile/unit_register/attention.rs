@@ -208,7 +208,10 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
     type Config = UnitTileAttentionConfig;
 
     type Query = UnitTile<QT<AP>>;
-    type KeyValue = UnitTile<KVT<AP>>;
+    /// Key fragment for Q·K^T. Uses KT (same as QT for unit register).
+    type Key = UnitTile<KT<AP>>;
+    /// Value fragment for P×V. Uses VT (same as KT for unit register in float mode).
+    type Value = UnitTile<VT<AP>>;
     type Mask = UnitTile<MSK<AP>>;
     type Softmax = UnitTile<SM<AP>>;
     type SoftmaxRow = UnitTile<SM<AP>>;
@@ -224,7 +227,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
 
     fn score_matmul(
         lhs: &Self::Query,
-        rhs: &Self::KeyValue,
+        rhs: &Self::Key,
         out: &mut Self::Softmax,
         #[comptime] config: Self::Config,
     ) {
@@ -234,7 +237,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
 
     fn value_matmul(
         lhs: &Self::Softmax,
-        rhs: &Self::KeyValue,
+        rhs: &Self::Value,
         out: &mut Self::Accumulator,
         #[comptime] config: Self::Config,
     ) {
@@ -242,27 +245,14 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
         unit_inner_matmul(lhs, rhs, out, m, n, k);
     }
 
-    fn allocate_key_value(#[comptime] config: Self::Config) -> Self::KeyValue {
-        UnitTile::new(UnitTileLayout::new(
-            comptime!(max(
-                config.shared.attention_tile_size.head_dim,
-                config.shared.attention_tile_size.seq_kv,
-            )),
-            comptime!(max(
-                config.shared.attention_tile_size.seq_kv,
-                config.shared.attention_tile_size.val_dim,
-            )),
-        ))
-    }
-
-    fn allocate_key(#[comptime] config: Self::Config) -> Self::KeyValue {
+    fn allocate_key(#[comptime] config: Self::Config) -> Self::Key {
         UnitTile::new(UnitTileLayout::new(
             config.shared.attention_tile_size.head_dim,
             config.shared.attention_tile_size.seq_kv,
         ))
     }
 
-    fn allocate_value(#[comptime] config: Self::Config) -> Self::KeyValue {
+    fn allocate_value(#[comptime] config: Self::Config) -> Self::Value {
         UnitTile::new(UnitTileLayout::new(
             config.shared.attention_tile_size.seq_kv,
             config.shared.attention_tile_size.val_dim,
@@ -297,7 +287,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
 
     fn load_key_transposed<E: Numeric>(
         tile: &StridedTile<E>,
-        fragment: &mut Self::KeyValue,
+        fragment: &mut Self::Key,
         #[comptime] _config: Self::Config,
     ) {
         strided_tile_to_transposed_unit_tile(tile, fragment);
@@ -305,7 +295,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
 
     fn load_value<E: Numeric>(
         tile: &StridedTile<E>,
-        fragment: &mut Self::KeyValue,
+        fragment: &mut Self::Value,
         #[comptime] _config: Self::Config,
     ) {
         strided_tile_to_unit_tile(tile, fragment);

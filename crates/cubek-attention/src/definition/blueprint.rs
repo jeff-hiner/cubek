@@ -9,7 +9,6 @@ pub struct AttentionBlueprint {
     pub tiling_scheme: AttentionTilingScheme,
     pub plane_dim: u32,
 
-    pub reuse_key_value: bool,
     pub two_rows_in_array_tile: bool,
 
     pub line_sizes: AttentionLineSizes,

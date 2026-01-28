@@ -1,28 +1,32 @@
 use cubecl;
 use cubecl::prelude::*;
 
-use crate::components::stage::StageAttentionConfig;
-use crate::components::stage::{KeyValueTile, PartitionAttentionConfig};
+use crate::components::stage::{KeyTile, ValueTile, PartitionAttentionConfig, StageAttentionConfig};
 use crate::components::tile::TileAttention;
 use crate::definition::AttentionPrecision;
 
-#[derive(CubeType)]
-/// To save registers, key and value can reuse the same fragment, since they run sequentially.
-/// Or they can be separate if desired or if shapes mismatch.
+/// Key and Value tile partitions for attention computation.
+///
+/// Key and Value are always stored separately since they may have different types
+/// (e.g., i8 for Key and f16 for Value in INT8 CMMA mode).
 ///
 /// For each `kv`:
 /// - Key: iterate over one column of `head_dim`, multiplying each (hd, kv) tile with all `seq_q` tiles.
 /// - Value: then iterate over one row of `val_dim`, multiplying each (kv, vd) tile with all `seq_q` tiles.
-///
-/// Only one tile is active at a time; key and value alternate per `kv`.
-pub enum KeyValuePartition<AP: AttentionPrecision, TA: TileAttention<AP>> {
-    Reuse(KeyValueSequence<AP, TA>),
-    Separate(KeyValueSequence<AP, TA>, KeyValueSequence<AP, TA>),
+#[derive(CubeType)]
+pub struct KeyValuePartition<AP: AttentionPrecision, TA: TileAttention<AP>> {
+    keys: KeySequence<AP, TA>,
+    values: ValueSequence<AP, TA>,
 }
 
 #[derive(CubeType)]
-pub struct KeyValueSequence<AP: AttentionPrecision, TA: TileAttention<AP>> {
-    sequence: Sequence<KeyValueTile<AP, TA>>,
+pub struct KeySequence<AP: AttentionPrecision, TA: TileAttention<AP>> {
+    sequence: Sequence<KeyTile<AP, TA>>,
+}
+
+#[derive(CubeType)]
+pub struct ValueSequence<AP: AttentionPrecision, TA: TileAttention<AP>> {
+    sequence: Sequence<ValueTile<AP, TA>>,
 }
 
 #[cube]
@@ -30,51 +34,31 @@ impl<AP: AttentionPrecision, TA: TileAttention<AP>> KeyValuePartition<AP, TA> {
     pub fn new(
         #[comptime] config: PartitionAttentionConfig<TA::Config>,
     ) -> KeyValuePartition<AP, TA> {
-        if config.shared().reuse_key_value {
-            let mut sequence = Sequence::new();
+        let mut keys = Sequence::new();
+        let mut values = Sequence::new();
 
-            sequence.push(KeyValueTile::new_key_value(config.tile_config()));
+        keys.push(KeyTile::new(config.tile_config()));
+        values.push(ValueTile::new(config.tile_config()));
 
-            KeyValuePartition::<AP, TA>::new_Reuse(KeyValueSequence::<AP, TA> { sequence })
-        } else {
-            let mut keys = Sequence::new();
-            let mut values = Sequence::new();
-
-            keys.push(KeyValueTile::new_key(config.tile_config()));
-            values.push(KeyValueTile::new_value(config.tile_config()));
-
-            KeyValuePartition::<AP, TA>::new_Separate(
-                KeyValueSequence::<AP, TA> { sequence: keys },
-                KeyValueSequence::<AP, TA> { sequence: values },
-            )
+        KeyValuePartition::<AP, TA> {
+            keys: KeySequence::<AP, TA> { sequence: keys },
+            values: ValueSequence::<AP, TA> { sequence: values },
         }
     }
 
-    pub fn get_key(&self) -> &KeyValueTile<AP, TA> {
-        match self {
-            KeyValuePartition::Reuse(key_values) => &key_values.sequence[0],
-            KeyValuePartition::Separate(keys, _) => &keys.sequence[0],
-        }
+    pub fn get_key(&self) -> &KeyTile<AP, TA> {
+        &self.keys.sequence[0]
     }
 
-    pub fn get_key_mut(&mut self) -> &mut KeyValueTile<AP, TA> {
-        match self {
-            KeyValuePartition::Reuse(key_values) => key_values.sequence.index_mut(0usize),
-            KeyValuePartition::Separate(keys, _) => keys.sequence.index_mut(0usize),
-        }
+    pub fn get_key_mut(&mut self) -> &mut KeyTile<AP, TA> {
+        self.keys.sequence.index_mut(0usize)
     }
 
-    pub fn get_value(&self) -> &KeyValueTile<AP, TA> {
-        match self {
-            KeyValuePartition::Reuse(key_values) => &key_values.sequence[0],
-            KeyValuePartition::Separate(_, values) => &values.sequence[0],
-        }
+    pub fn get_value(&self) -> &ValueTile<AP, TA> {
+        &self.values.sequence[0]
     }
 
-    pub fn get_value_mut(&mut self) -> &mut KeyValueTile<AP, TA> {
-        match self {
-            KeyValuePartition::Reuse(key_values) => key_values.sequence.index_mut(0usize),
-            KeyValuePartition::Separate(_, values) => values.sequence.index_mut(0usize),
-        }
+    pub fn get_value_mut(&mut self) -> &mut ValueTile<AP, TA> {
+        self.values.sequence.index_mut(0usize)
     }
 }

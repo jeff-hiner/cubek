@@ -137,7 +137,6 @@ fn blueprint(
             let blueprint = AttentionBlueprint {
                 hypercube_blueprint: HypercubeBlueprint {},
                 plane_dim: launch_settings.plane_dim,
-                reuse_key_value: false,
                 two_rows_in_array_tile: false,
                 line_sizes: launch_settings.line_sizes.clone(),
                 masked: problem.masked,

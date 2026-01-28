@@ -21,7 +21,10 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
     type Config = BlackboxAcceleratedAttentionMatmulConfig;
 
     type Query = cmma::Matrix<QT<AP>>;
-    type KeyValue = cmma::Matrix<KVT<AP>>;
+    /// Key fragment for Q·K^T CMMA. Uses KT (i8 for INT8, f16 for float).
+    type Key = cmma::Matrix<KT<AP>>;
+    /// Value fragment for P×V CMMA. Uses VT (f16 for both INT8 and float).
+    type Value = cmma::Matrix<VT<AP>>;
     type Mask = LocalTile<SM<AP>>;
     type Softmax = HybridFragment<SM<AP>>;
     type SoftmaxRow = LocalTile<SM<AP>>;
@@ -42,7 +45,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
 
     fn score_matmul(
         lhs: &Self::Query,
-        rhs: &Self::KeyValue,
+        rhs: &Self::Key,
         out: &mut Self::Softmax,
         #[comptime] config: Self::Config,
     ) {
@@ -64,26 +67,30 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
                 )
             };
             cmma::fill(&temp_acc, SACC::<AP>::from_int(0));
-            cmma::execute::<QT<AP>, KVT<AP>, SACC<AP>, SACC<AP>>(lhs, rhs, &temp_acc, &temp_acc);
+            cmma::execute::<QT<AP>, KT<AP>, SACC<AP>, SACC<AP>>(lhs, rhs, &temp_acc, &temp_acc);
 
             // Cast i32 → f32 and store to HybridFragment
             out.store_from_cmma_matrix(&temp_acc);
         } else {
             // Float path: direct CMMA to f32
             let out_fragment = &out.fragment;
-            cmma::execute::<QT<AP>, KVT<AP>, SM<AP>, SM<AP>>(lhs, rhs, out_fragment, out_fragment);
+            cmma::execute::<QT<AP>, KT<AP>, SM<AP>, SM<AP>>(lhs, rhs, out_fragment, out_fragment);
         }
     }
 
     fn value_matmul(
         lhs: &Self::Softmax,
-        rhs: &Self::KeyValue,
+        rhs: &Self::Value,
         out: &mut Self::Accumulator,
         #[comptime] _config: Self::Config,
     ) {
-        let lhs = &lhs.fragment;
+        // Cast softmax from SM to VT for tensor core CMMA.
+        // On non-macOS: SM=f32, VT=f16 → need cast f32→f16
+        // On macOS: SM=f16, VT=f16 → cast is identity
+        // Reference: p = p.to(tl.float16); acc += tl.dot(p, v, out_dtype=tl.float16)
+        let lhs_cast = cmma::cast::<SM<AP>, VT<AP>>(&lhs.fragment);
         let out = &out.fragment;
-        cmma::execute::<SM<AP>, KVT<AP>, ACC<AP>, ACC<AP>>(lhs, rhs, out, out);
+        cmma::execute::<VT<AP>, VT<AP>, ACC<AP>, ACC<AP>>(&lhs_cast, rhs, out, out);
     }
 
     fn allocate_query(#[comptime] config: Self::Config) -> Self::Query {
@@ -100,16 +107,10 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
         }
     }
 
-    fn allocate_key_value(#[comptime] _config: Self::Config) -> Self::KeyValue {
-        panic!(
-            "Can't reuse key/value because the fragment is col major for key and row major for value"
-        )
-    }
-
-    fn allocate_key(#[comptime] config: Self::Config) -> Self::KeyValue {
+    fn allocate_key(#[comptime] config: Self::Config) -> Self::Key {
         let size = config.attention_tile_size();
         unsafe {
-            cmma::Matrix::<KVT<AP>>::uninitialized(
+            cmma::Matrix::<KT<AP>>::uninitialized(
                 cmma::MatrixIdent::B,
                 size.seq_q as usize,
                 size.seq_kv as usize,
@@ -119,10 +120,10 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
         }
     }
 
-    fn allocate_value(#[comptime] config: Self::Config) -> Self::KeyValue {
+    fn allocate_value(#[comptime] config: Self::Config) -> Self::Value {
         let size = config.attention_tile_size();
         unsafe {
-            cmma::Matrix::<KVT<AP>>::uninitialized(
+            cmma::Matrix::<VT<AP>>::uninitialized(
                 cmma::MatrixIdent::B,
                 size.seq_q as usize,
                 size.val_dim as usize,
@@ -158,7 +159,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
 
     fn load_key_transposed<E: Numeric>(
         tile: &StridedTile<E>,
-        rhs: &mut Self::KeyValue,
+        rhs: &mut Self::Key,
         #[comptime] _config: Self::Config,
     ) {
         let (slice, stride) = tile.as_unlined();
@@ -167,7 +168,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
 
     fn load_value<E: Numeric>(
         tile: &StridedTile<E>,
-        rhs: &mut Self::KeyValue,
+        rhs: &mut Self::Value,
         #[comptime] _config: Self::Config,
     ) {
         let (slice, stride) = tile.as_unlined();

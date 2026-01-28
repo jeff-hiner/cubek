@@ -25,7 +25,10 @@ pub(crate) const FULLY_MASKED_ROW_THRESHOLD: f32 = 1e-4;
 pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
     type Config: TileAttentionConfig;
     type Query: CubeType;
-    type KeyValue: CubeType;
+    /// Key fragment type for Q·K^T CMMA. For float: f16. For INT8: i8.
+    type Key: CubeType;
+    /// Value fragment type for P×V CMMA. For float: f16. For INT8: f16.
+    type Value: CubeType;
     type Mask: FragmentMask<Layout = Self::FragmentLayout>;
 
     type Softmax: FragmentSoftmax<SM<AP>, Layout = Self::FragmentLayout, SoftmaxRowFormat = Self::SoftmaxRow>;
@@ -42,14 +45,18 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
     /// For INT8 CMMA: CMMA outputs i32, which is converted to f32 internally.
     fn score_matmul(
         lhs: &Self::Query,
-        rhs: &Self::KeyValue,
+        rhs: &Self::Key,
         out: &mut Self::Softmax,
         #[comptime] config: Self::Config,
     );
 
+    /// Compute P×V (softmax × Value) accumulation.
+    ///
+    /// For float attention: f16 × f16 → f32.
+    /// For INT8 CMMA: f16 × f16 → f32 (V stays f16, not quantized).
     fn value_matmul(
         lhs: &Self::Softmax,
-        rhs: &Self::KeyValue,
+        rhs: &Self::Value,
         out: &mut Self::Accumulator,
         #[comptime] config: Self::Config,
     );
@@ -57,9 +64,8 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
     fn allocate_query(#[comptime] config: Self::Config) -> Self::Query;
     fn allocate_mask(#[comptime] config: Self::Config) -> Self::Mask;
 
-    fn allocate_key(#[comptime] config: Self::Config) -> Self::KeyValue;
-    fn allocate_value(#[comptime] config: Self::Config) -> Self::KeyValue;
-    fn allocate_key_value(#[comptime] config: Self::Config) -> Self::KeyValue;
+    fn allocate_key(#[comptime] config: Self::Config) -> Self::Key;
+    fn allocate_value(#[comptime] config: Self::Config) -> Self::Value;
 
     fn allocate_softmax(#[comptime] config: Self::Config) -> Self::Softmax;
     fn allocate_accumulator(#[comptime] config: Self::Config) -> Self::Accumulator;
@@ -68,12 +74,12 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
 
     fn load_key_transposed<E: Numeric>(
         tile: &StridedTile<E>,
-        fragment: &mut Self::KeyValue,
+        fragment: &mut Self::Key,
         #[comptime] config: Self::Config,
     );
     fn load_value<E: Numeric>(
         tile: &StridedTile<E>,
-        fragment: &mut Self::KeyValue,
+        fragment: &mut Self::Value,
         #[comptime] config: Self::Config,
     );
     fn load_mask<E: Numeric>(
