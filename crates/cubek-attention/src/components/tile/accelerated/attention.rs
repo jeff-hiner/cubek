@@ -46,12 +46,12 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
     fn score_matmul(
         lhs: &Self::Query,
         rhs: &Self::Key,
+        _key_tile: &StridedTile<KS<AP>>,
         out: &mut Self::Softmax,
         #[comptime] config: Self::Config,
     ) {
-        // Check if score accumulator type differs from softmax type (INT8 path)
-        // For INT8: SACC=i32, SM=f32 → needs i32 CMMA then cast to f32
-        // For Float: SACC=f32, SM=f32 → direct f32 CMMA
+        // CMMA path - uses lhs (Query CMMA) and rhs (Key CMMA)
+        // key_tile is ignored here; it's used by score_matmul_scalar instead
         let needs_conversion = comptime!(AP::REQUIRES_SCORE_CONVERSION);
 
         if needs_conversion {
@@ -76,6 +76,87 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
             let out_fragment = &out.fragment;
             cmma::execute::<QT<AP>, KT<AP>, SM<AP>, SM<AP>>(lhs, rhs, out_fragment, out_fragment);
         }
+    }
+
+    fn score_matmul_scalar<QE: Numeric>(
+        query_scalar: &Slice<QE>,
+        key_tile: &StridedTile<KS<AP>>,
+        out: &mut Self::Softmax,
+        #[comptime] config: Self::Config,
+    ) {
+        // DP4a path for INT8: reads Q from scalar storage, K from StridedTile,
+        // uses vectorized INT8 dot products (4 multiply-adds per instruction),
+        // writes directly to LocalTile. No sync needed before rowwise_mut!
+        let size = config.attention_tile_size();
+        let seq_kv = size.seq_kv;
+        let head_dim = size.head_dim;
+
+        // Get the local_tile for direct output
+        let local_tile = out.local_tile_mut();
+
+        // Layout parameters for computing absolute positions
+        let unit_size_rows = local_tile.layout.unit_size.0;
+        let unit_size_cols = local_tile.layout.unit_size.1;
+        let num_units_per_row = comptime!(seq_kv / unit_size_cols);
+        let row_jump = comptime!(config.shared.plane_dim / num_units_per_row);
+
+        // DP4a processes 4 INT8 elements at a time
+        let dp4a_size = 4u32;
+        let head_dim_iters = comptime!(head_dim / dp4a_size);
+
+        // Precompute K tile access parameters
+        let k_line_size = key_tile.line_size;
+
+        // Each unit computes its assigned output elements
+        #[unroll]
+        for r in 0..unit_size_rows {
+            #[unroll]
+            for c in 0..unit_size_cols {
+                // Compute absolute position (same as LocalTileLayout::absolute_pos)
+                let row_0 = UNIT_POS_X / num_units_per_row;
+                let out_row = r * row_jump + row_0;
+                let out_col = unit_size_cols * (UNIT_POS_X % num_units_per_row) + c;
+
+                // K column access (same for all k iterations)
+                let k_col_line = out_col / k_line_size;
+                let k_col_offset = out_col % k_line_size;
+
+                // Compute Q[out_row, :] · K[:, out_col] using DP4a
+                let mut sum_i32 = 0i32;
+
+                for k_iter in 0..head_dim_iters {
+                    let k_base = k_iter * dp4a_size;
+
+                    // Load 4 Q elements (contiguous in row-major storage)
+                    let q_base_idx = out_row * head_dim + k_base;
+                    let mut q_line = Line::<i8>::empty(4usize);
+                    #[unroll]
+                    for i in 0..4usize {
+                        q_line[i] = i8::cast_from(query_scalar[(q_base_idx + i as u32) as usize]);
+                    }
+
+                    // Load 4 K elements (from consecutive rows, same column)
+                    // K is stored transposed: (head_dim rows, seq_kv cols)
+                    let mut k_line = Line::<i8>::empty(4usize);
+                    #[unroll]
+                    for i in 0..4usize {
+                        let k_row = k_base + i as u32;
+                        let k_val = key_tile.get_line(k_row, k_col_line)[k_col_offset as usize];
+                        k_line[i] = i8::cast_from(k_val);
+                    }
+
+                    // DP4a: 4 INT8 multiply-adds in one instruction
+                    sum_i32 += q_line.dot_i32(k_line);
+                }
+
+                // Cast i32 result to f32 and accumulate into local_tile
+                let idx = (r * unit_size_cols + c) as usize;
+                local_tile.array[idx] += SM::<AP>::cast_from(sum_i32);
+            }
+        }
+
+        // Mark that local_tile has valid data - rowwise_mut() will skip SMEM operations
+        out.mark_local_valid();
     }
 
     fn value_matmul(

@@ -14,7 +14,7 @@ use crate::components::tile::{FragmentLayout, FragmentLayoutExpand};
 /// Assumes:
 /// - unit_size * plane_dim = total_size (not dim wise but in total count)
 pub struct LocalTile<E: Numeric> {
-    array: Array<E>,
+    pub array: Array<E>,
     pub layout: LocalTileLayout,
 }
 
@@ -97,7 +97,7 @@ pub struct LocalTileLayout {
     #[cube(comptime)]
     total_size: Coords2d,
     #[cube(comptime)]
-    unit_size: Coords2d,
+    pub unit_size: Coords2d,
     #[cube(comptime)]
     num_units_per_row: u32,
     #[cube(comptime)]

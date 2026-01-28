@@ -3,7 +3,7 @@ use cubecl::prelude::*;
 
 use crate::components::stage::StageAttentionConfig;
 use crate::components::stage::{PartitionAttentionConfig, QueryTile};
-use crate::components::tile::TileAttention;
+use crate::components::tile::{TileAttention, TileAttentionConfig as _};
 use crate::definition::AttentionPrecision;
 
 #[derive(CubeType)]
@@ -16,12 +16,16 @@ pub struct QueryPartition<AP: AttentionPrecision, TA: TileAttention<AP>> {
 impl<AP: AttentionPrecision, TA: TileAttention<AP>> QueryPartition<AP, TA> {
     pub fn new(#[comptime] config: PartitionAttentionConfig<TA::Config>) -> QueryPartition<AP, TA> {
         let p = config.shared().partition_size;
+        let tile_size = config.tile_config().attention_tile_size();
 
         let mut sequence = Sequence::new();
 
         #[unroll]
         for _ in 0..p.seq_q * p.head_dim {
-            sequence.push(QueryTile::<AP, TA>::new(config.tile_config()));
+            sequence.push(QueryTile::<AP, TA>::new(
+                (tile_size.seq_q, tile_size.head_dim),
+                config.tile_config(),
+            ));
         }
 
         QueryPartition::<AP, TA> { sequence }

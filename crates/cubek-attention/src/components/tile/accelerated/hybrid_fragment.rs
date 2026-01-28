@@ -16,11 +16,14 @@ pub struct HybridFragment<E: Float> {
     // A slice because knows only the slot for this plane
     smem_slice: SliceMut<E>,
     // Where to perform operations in register
-    local_tile: LocalTile<E>,
+    pub local_tile: LocalTile<E>,
     #[cube(comptime)]
     stride: u32,
     // Flag: true if smem_slice already contains valid data (avoids redundant CMMA store)
     smem_valid: bool,
+    // Flag: true if local_tile contains valid data directly (avoids ALL SMEM operations)
+    // Used by hybrid scalar score path where Q·K^T is computed directly to local_tile
+    local_valid: bool,
 }
 
 #[cube]
@@ -62,12 +65,27 @@ impl<E: Float> HybridFragment<E> {
             local_tile,
             stride: tile_size.n,
             smem_valid: false,
+            local_valid: false,
         }
     }
 
     fn zero(&mut self) {
         cmma::fill(&self.fragment, E::from_int(0));
         self.smem_valid = false;
+        self.local_valid = false;
+    }
+
+    /// Mark that local_tile contains valid score data (computed directly, bypassing CMMA).
+    /// When this is set, rowwise_mut() skips ALL SMEM operations - just returns local_tile.
+    /// This eliminates one sync_cube() for the scalar score path.
+    pub fn mark_local_valid(&mut self) {
+        self.local_valid = true;
+    }
+
+    /// Get mutable access to local_tile for direct score writes (scalar/DP4a path).
+    /// Caller should call mark_local_valid() after populating the tile.
+    pub fn local_tile_mut(&mut self) -> &mut LocalTile<E> {
+        &mut self.local_tile
     }
 
     /// Store scores from an external CMMA matrix (used for INT8 path where CMMA outputs i32).
@@ -96,23 +114,27 @@ impl<E: Float> FragmentSoftmax<E> for HybridFragment<E> {
     type SoftmaxVal = cmma::Matrix<E>;
 
     fn rowwise_mut(&mut self) -> &mut Self::SoftmaxRowFormat {
+        // If local_valid is true, data is already in local_tile (from scalar score path).
+        // Skip ALL SMEM operations - this saves one sync_cube() entirely.
         // If smem_valid is true, data is already in SMEM (from store_from_cmma_matrix)
-        // so we can skip the CMMA store. This saves one sync for INT8 path.
-        if !self.smem_valid {
-            cmma::store(
-                &mut self.smem_slice,
-                &self.fragment,
-                self.stride,
-                cmma::MatrixLayout::RowMajor,
-            );
+        // so we can skip the CMMA store. This saves one sync for INT8 CMMA path.
+        if !self.local_valid {
+            if !self.smem_valid {
+                cmma::store(
+                    &mut self.smem_slice,
+                    &self.fragment,
+                    self.stride,
+                    cmma::MatrixLayout::RowMajor,
+                );
+            }
+
+            sync_cube();
+
+            self.local_tile.load_from_slice(&self.smem_slice.to_slice());
+
+            // Note: No sync needed here - loads go to per-unit registers,
+            // and subsequent modifications happen on those registers (not shared memory).
         }
-
-        sync_cube();
-
-        self.local_tile.load_from_slice(&self.smem_slice.to_slice());
-
-        // Note: No sync needed here - loads go to per-unit registers,
-        // and subsequent modifications happen on those registers (not shared memory).
 
         &mut self.local_tile
     }
@@ -129,8 +151,9 @@ impl<E: Float> FragmentSoftmax<E> for HybridFragment<E> {
             cmma::MatrixLayout::RowMajor,
         );
 
-        // Clear smem_valid - fragment now has the authoritative data
+        // Clear validity flags - fragment now has the authoritative data
         self.smem_valid = false;
+        self.local_valid = false;
     }
 
     fn zero(&mut self) {

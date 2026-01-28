@@ -113,18 +113,32 @@ impl<
                     // Get the q,hd-th query which is always in registers
                     let query_tile = query_partition.get_at(q, hd, config);
 
-                    // Get the only key-value tile and fill it with hd,kv-th key data
-                    let key_tile = key_value_partition.get_key_mut();
+                    // Get the key data from stage SMEM
                     let key_data = SK::tile(key_stage, (kv, hd as u32).runtime());
-                    TA::load_key_transposed(&key_data, key_tile.key_mut(), config.tile_config());
 
-                    // Perform score matmul on query and key, and accumulate in softmax tile
-                    TA::score_matmul(
-                        &query_tile.fragment,
-                        key_tile.key(),
-                        softmax_tile,
-                        config.tile_config(),
-                    );
+                    // Choose between scalar path (INT8) and CMMA path (float)
+                    let use_scalar_path = comptime!(AP::REQUIRES_SCORE_CONVERSION);
+                    if use_scalar_path {
+                        // INT8 scalar path: read Q from scalar storage, K from StridedTile
+                        // Writes directly to LocalTile, avoiding CMMA → SMEM sync
+                        TA::score_matmul_scalar(
+                            &query_tile.scalar_slice(),
+                            &key_data,
+                            softmax_tile,
+                            config.tile_config(),
+                        );
+                    } else {
+                        // Float CMMA path: load K into CMMA fragment, use CMMA matmul
+                        let key_tile = key_value_partition.get_key_mut();
+                        TA::load_key_transposed(&key_data, key_tile.key_mut(), config.tile_config());
+                        TA::score_matmul(
+                            &query_tile.fragment,
+                            key_tile.key(),
+                            &key_data,
+                            softmax_tile,
+                            config.tile_config(),
+                        );
+                    }
                 }
 
                 // At this point, the softmax tile is filled with score
@@ -274,6 +288,7 @@ impl<
         let partition_seq_q = config.shared().partition_size.seq_q;
         let partition_head_dim = config.shared().partition_size.head_dim;
         let attention_tile_size = config.shared().tile_config.attention_tile_size();
+        let tile_size = (attention_tile_size.seq_q, attention_tile_size.head_dim);
 
         #[unroll]
         for q in 0..partition_seq_q as usize {
@@ -287,7 +302,7 @@ impl<
                     partition_head_dim,
                 );
 
-                tile_to_write.update(&tile_read);
+                tile_to_write.update(&tile_read, tile_size);
             }
         }
     }

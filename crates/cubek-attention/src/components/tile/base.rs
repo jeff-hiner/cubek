@@ -5,7 +5,7 @@ use crate::{
     definition::{
         AttentionBlueprint, AttentionPrecision, AttentionSetupError, AttentionTileSize,
         InvalidConfigError,
-        attention_types::{ACC, SM},
+        attention_types::{ACC, KS, SM},
     },
 };
 use cubecl::{self, prelude::*};
@@ -41,11 +41,29 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
 
     /// Compute Q·K^T score matrix.
     ///
-    /// For float attention: directly outputs to Softmax type.
+    /// For float attention: directly outputs to Softmax type using CMMA.
     /// For INT8 CMMA: CMMA outputs i32, which is converted to f32 internally.
+    ///
+    /// The `key_tile` parameter provides raw access to the key data from stage SMEM,
+    /// enabling scalar computation paths that bypass CMMA for reduced sync overhead.
     fn score_matmul(
         lhs: &Self::Query,
         rhs: &Self::Key,
+        key_tile: &StridedTile<KS<AP>>,
+        out: &mut Self::Softmax,
+        #[comptime] config: Self::Config,
+    );
+
+    /// Compute Q·K^T using scalar operations with direct LocalTile output.
+    ///
+    /// For INT8 path: reads Q from scalar storage, K from StridedTile,
+    /// writes directly to LocalTile, avoiding CMMA→SMEM→LocalTile conversion.
+    /// This reduces sync count from 2 to 1 per KV tile.
+    ///
+    /// Default implementation calls score_matmul (CMMA path).
+    fn score_matmul_scalar<QE: Numeric>(
+        query_scalar: &Slice<QE>,
+        key_tile: &StridedTile<KS<AP>>,
         out: &mut Self::Softmax,
         #[comptime] config: Self::Config,
     );
