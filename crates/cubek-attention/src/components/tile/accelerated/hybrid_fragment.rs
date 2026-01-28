@@ -19,6 +19,8 @@ pub struct HybridFragment<E: Float> {
     local_tile: LocalTile<E>,
     #[cube(comptime)]
     stride: u32,
+    // Flag: true if smem_slice already contains valid data (avoids redundant CMMA store)
+    smem_valid: bool,
 }
 
 #[cube]
@@ -59,15 +61,18 @@ impl<E: Float> HybridFragment<E> {
             smem_slice,
             local_tile,
             stride: tile_size.n,
+            smem_valid: false,
         }
     }
 
     fn zero(&mut self) {
         cmma::fill(&self.fragment, E::from_int(0));
+        self.smem_valid = false;
     }
 
     /// Store scores from an external CMMA matrix (used for INT8 path where CMMA outputs i32).
-    /// The scores are cast from type T to E, stored to shared memory, then loaded into fragment.
+    /// The scores are cast from type T to E, stored to shared memory.
+    /// Sets smem_valid=true so rowwise_mut() can skip redundant CMMA store.
     pub fn store_from_cmma_matrix<T: Numeric>(&mut self, scores: &cmma::Matrix<T>) {
         let casted = cmma::cast::<T, E>(scores);
         cmma::store(
@@ -76,13 +81,10 @@ impl<E: Float> HybridFragment<E> {
             self.stride,
             cmma::MatrixLayout::RowMajor,
         );
-        sync_cube();
-        cmma::load_with_layout(
-            &self.fragment,
-            &self.smem_slice.to_slice(),
-            self.stride,
-            cmma::MatrixLayout::RowMajor,
-        );
+        // Mark SMEM as valid - rowwise_mut() will use this data directly
+        // instead of storing from fragment again
+        self.smem_valid = true;
+        // Note: No sync or reload here - rowwise_mut() will sync before loading
     }
 }
 
@@ -94,18 +96,23 @@ impl<E: Float> FragmentSoftmax<E> for HybridFragment<E> {
     type SoftmaxVal = cmma::Matrix<E>;
 
     fn rowwise_mut(&mut self) -> &mut Self::SoftmaxRowFormat {
-        cmma::store(
-            &mut self.smem_slice,
-            &self.fragment,
-            self.stride,
-            cmma::MatrixLayout::RowMajor,
-        );
+        // If smem_valid is true, data is already in SMEM (from store_from_cmma_matrix)
+        // so we can skip the CMMA store. This saves one sync for INT8 path.
+        if !self.smem_valid {
+            cmma::store(
+                &mut self.smem_slice,
+                &self.fragment,
+                self.stride,
+                cmma::MatrixLayout::RowMajor,
+            );
+        }
 
         sync_cube();
 
         self.local_tile.load_from_slice(&self.smem_slice.to_slice());
 
-        sync_cube();
+        // Note: No sync needed here - loads go to per-unit registers,
+        // and subsequent modifications happen on those registers (not shared memory).
 
         &mut self.local_tile
     }
@@ -120,7 +127,10 @@ impl<E: Float> FragmentSoftmax<E> for HybridFragment<E> {
             &self.smem_slice.to_slice(),
             self.stride,
             cmma::MatrixLayout::RowMajor,
-        )
+        );
+
+        // Clear smem_valid - fragment now has the authoritative data
+        self.smem_valid = false;
     }
 
     fn zero(&mut self) {
