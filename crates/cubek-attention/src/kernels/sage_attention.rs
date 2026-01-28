@@ -18,6 +18,14 @@ pub const BLOCK_M: usize = 64;
 /// Block size for KV tiling (number of KV positions loaded to shared memory at once)
 pub const BLOCK_N: usize = 32;
 
+/// Block size for query quantization (number of rows per quantization block)
+/// Reference uses BLKQ=128
+pub const BLOCK_Q_QUANT: usize = 128;
+
+/// Block size for key quantization (number of rows per quantization block)
+/// Reference uses BLKK=64
+pub const BLOCK_K_QUANT: usize = 64;
+
 /// Configuration for SageAttention kernel
 #[derive(Clone, Copy, Debug)]
 pub struct SageAttentionConfig {
@@ -74,11 +82,16 @@ pub fn launch_sage_attention<R: Runtime>(
     let q_elems = num_q_rows * config.head_dim;
     let k_elems = num_k_rows * config.head_dim;
 
+    // Per-block quantization: one scale per block instead of per row
+    // Reference uses BLKQ=128 for Q, BLKK=64 for K
+    let num_q_blocks = (num_q_rows + BLOCK_Q_QUANT - 1) / BLOCK_Q_QUANT;
+    let num_k_blocks = (num_k_rows + BLOCK_K_QUANT - 1) / BLOCK_K_QUANT;
+
     // Allocate temporary buffers for INT8 quantization
     let q_int8_handle = client.empty(q_elems);
     let k_int8_handle = client.empty(k_elems);
-    let q_scales_handle = client.empty(num_q_rows * core::mem::size_of::<f32>());
-    let k_scales_handle = client.empty(num_k_rows * core::mem::size_of::<f32>());
+    let q_scales_handle = client.empty(num_q_blocks * core::mem::size_of::<f32>());
+    let k_scales_handle = client.empty(num_k_blocks * core::mem::size_of::<f32>());
 
     // Create tensor refs for INT8 buffers
     let q_shape = vec![config.batch, config.heads, config.seq_q, config.head_dim];
@@ -95,9 +108,9 @@ pub fn launch_sage_attention<R: Runtime>(
         config.head_dim,
         1,
     ];
-    let q_scales_shape = vec![num_q_rows];
+    let q_scales_shape = vec![num_q_blocks];
     let q_scales_strides = vec![1];
-    let k_scales_shape = vec![num_k_rows];
+    let k_scales_shape = vec![num_k_blocks];
     let k_scales_strides = vec![1];
 
     let q_int8_ref =
@@ -111,7 +124,7 @@ pub fn launch_sage_attention<R: Runtime>(
         TensorHandleRef::from_raw_parts(&k_scales_handle, &k_scales_strides, &k_scales_shape, 4)
     };
 
-    // Quantize Q and K to INT8
+    // Quantize Q and K to INT8 with per-block scaling
     launch_quantize_int8(
         client,
         q,
@@ -121,6 +134,7 @@ pub fn launch_sage_attention<R: Runtime>(
         config.heads,
         config.seq_q,
         config.head_dim,
+        BLOCK_Q_QUANT,
     )?;
     launch_quantize_int8(
         client,
@@ -131,6 +145,7 @@ pub fn launch_sage_attention<R: Runtime>(
         config.heads,
         config.seq_kv,
         config.head_dim,
+        BLOCK_K_QUANT,
     )?;
 
     // Run tiled INT8 attention with exp2 (matching reference)
@@ -786,6 +801,8 @@ pub fn launch_sage_attention_tiled_int8<R: Runtime>(
             BLOCK_M as u32,
             BLOCK_N as u32,
             INT8_LINE_SIZE as u32,
+            BLOCK_Q_QUANT as u32,
+            BLOCK_K_QUANT as u32,
         )
     }
 }
@@ -813,6 +830,8 @@ fn attention_kernel_tiled_int8(
     #[comptime] block_m: u32,
     #[comptime] block_n: u32,
     #[comptime] line_size: u32,
+    #[comptime] q_quant_block_size: u32,
+    #[comptime] k_quant_block_size: u32,
 ) {
     let cube_id: u32 = CUBE_POS_X;
     let unit_id: u32 = UNIT_POS_X;
@@ -836,14 +855,18 @@ fn attention_kernel_tiled_int8(
     // Compute base offsets (in elements)
     let q_base: u32 = batch * num_heads * seq_q * head_dim + head * seq_q * head_dim + query_pos * head_dim;
     let kv_base: u32 = batch * num_heads * seq_kv * head_dim + head * seq_kv * head_dim;
-    let q_scale_base: u32 = batch * num_heads * seq_q + head * seq_q;
-    let k_scale_base: u32 = batch * num_heads * seq_kv + head * seq_kv;
+
+    // Per-block scale indexing:
+    // Row position = batch * num_heads * seq + head * seq + pos
+    // Block index = row_position / block_size
+    let q_row_pos: u32 = batch * num_heads * seq_q + head * seq_q + query_pos;
+    let k_row_base: u32 = batch * num_heads * seq_kv + head * seq_kv;
 
     // Number of Line<i8> per row
     let head_dim_lines: u32 = head_dim / line_size;
 
-    // Load Q scale
-    let q_scale_idx: usize = (q_scale_base + query_pos) as usize;
+    // Load Q scale (per-block: same scale for all rows in the block)
+    let q_scale_idx: usize = (q_row_pos / q_quant_block_size) as usize;
     let q_scale: f32 = f32::cast_from(q_scales[q_scale_idx][0]);
 
     // Q line base for this query (in Lines)
@@ -883,8 +906,9 @@ fn attention_kernel_tiled_int8(
             // K line base for this KV position (in Lines)
             let k_line_base: u32 = kv_base / line_size + kv_idx * head_dim_lines;
 
-            // Get K scale
-            let k_scale_idx: usize = (k_scale_base + kv_idx) as usize;
+            // Get K scale (per-block: same scale for all rows in the block)
+            let k_row_pos: u32 = k_row_base + kv_idx;
+            let k_scale_idx: usize = (k_row_pos / k_quant_block_size) as usize;
             let k_scale: f32 = f32::cast_from(k_scales[k_scale_idx][0]);
 
             // Compute Q·K dot product using DP4a
@@ -925,7 +949,9 @@ fn attention_kernel_tiled_int8(
         while kv_idx < kv_end {
             // Recompute score (could cache but register pressure)
             let k_line_base: u32 = kv_base / line_size + kv_idx * head_dim_lines;
-            let k_scale_idx: usize = (k_scale_base + kv_idx) as usize;
+            // Get K scale (per-block: same scale for all rows in the block)
+            let k_row_pos2: u32 = k_row_base + kv_idx;
+            let k_scale_idx: usize = (k_row_pos2 / k_quant_block_size) as usize;
             let k_scale: f32 = f32::cast_from(k_scales[k_scale_idx][0]);
 
             let mut dot_i32: i32 = 0i32;
@@ -976,15 +1002,16 @@ fn attention_kernel_tiled_int8(
 // INT8 Quantization for SageAttention
 // =============================================================================
 
-/// Launch INT8 quantization kernel
+/// Launch INT8 quantization kernel with per-block scaling
 ///
-/// Quantizes a tensor to INT8 with per-row scale factors.
-/// For each row: scale = max(abs(row)) / 127, quantized = round(value / scale)
+/// Quantizes a tensor to INT8 with per-block scale factors.
+/// For each block of `block_size` rows: scale = max(abs(block)) / 127
 ///
 /// # Arguments
 /// * `input` - Input tensor [batch, heads, seq, head_dim] (f32)
 /// * `output` - Output tensor [batch, heads, seq, head_dim] (i8)
-/// * `scales` - Scale factors [batch, heads, seq] (f32)
+/// * `scales` - Scale factors [num_blocks] (f32), where num_blocks = ceil(batch*heads*seq / block_size)
+/// * `block_size` - Number of rows per quantization block (e.g., 128 for Q, 64 for K)
 #[allow(clippy::too_many_arguments)]
 pub fn launch_quantize_int8<R: Runtime>(
     client: &ComputeClient<R>,
@@ -995,14 +1022,19 @@ pub fn launch_quantize_int8<R: Runtime>(
     heads: usize,
     seq: usize,
     head_dim: usize,
+    block_size: usize,
 ) -> Result<(), LaunchError> {
     let num_rows = batch * heads * seq;
-    let units_per_cube = 64.min(head_dim);
+    let num_blocks = (num_rows + block_size - 1) / block_size;
+
+    // Each cube handles one block, units cooperate on finding max and quantizing
+    // Use enough units to cover block_size rows in parallel
+    let units_per_cube = 64.min(block_size * head_dim);
     let cube_dim = CubeDim::new(client, units_per_cube);
-    let cube_count = CubeCount::new_1d(num_rows as u32);
+    let cube_count = CubeCount::new_1d(num_blocks as u32);
 
     unsafe {
-        quantize_int8_kernel::launch_unchecked::<R>(
+        quantize_int8_block_kernel::launch_unchecked::<R>(
             client,
             cube_count,
             cube_dim,
@@ -1010,61 +1042,82 @@ pub fn launch_quantize_int8<R: Runtime>(
             output.as_tensor_arg(1),
             scales.as_tensor_arg(1),
             ScalarArg::new(head_dim as u32),
+            ScalarArg::new(num_rows as u32),
+            ScalarArg::new(block_size as u32),
         )
     }
 }
 
-/// Per-row INT8 quantization kernel
+/// Per-block INT8 quantization kernel
 ///
-/// Each cube handles one row (one query/key position).
-/// Units cooperate to find max abs value, then quantize.
+/// Each cube handles one block of rows (block_size query/key positions).
+/// Units cooperate to find max abs value across the entire block, then quantize.
+/// This matches the reference SageAttention which uses BLKQ=128 and BLKK=64.
 #[cube(launch_unchecked)]
-fn quantize_int8_kernel(
+fn quantize_int8_block_kernel(
     input: &Tensor<Line<f32>>,
     output: &mut Tensor<Line<i8>>,
     scales: &mut Tensor<Line<f32>>,
     head_dim: u32,
+    num_rows: u32,
+    block_size: u32,
 ) {
-    let row_id: u32 = CUBE_POS_X;
+    let block_id: u32 = CUBE_POS_X;
     let unit_id: u32 = UNIT_POS_X;
     let num_units: u32 = CUBE_DIM_X;
 
-    let row_base: u32 = row_id * head_dim;
+    // Compute row range for this block
+    let row_start: u32 = block_id * block_size;
+    let row_end: u32 = select(row_start + block_size > num_rows, num_rows, row_start + block_size);
+    let block_rows: u32 = row_end - row_start;
 
-    // Step 1: Find max absolute value in this row (parallel reduction)
+    // Total elements in this block
+    let block_elems: u32 = block_rows * head_dim;
+
+    // Step 1: Find max absolute value across the entire block (parallel reduction)
     let mut local_max: f32 = 0.0f32;
-    let mut d: u32 = unit_id;
-    while d < head_dim {
-        let idx: usize = (row_base + d) as usize;
-        let val: f32 = f32::cast_from(input[idx][0]);
+    let mut elem_idx: u32 = unit_id;
+    while elem_idx < block_elems {
+        // Convert block-local index to global index
+        let local_row: u32 = elem_idx / head_dim;
+        let local_col: u32 = elem_idx % head_dim;
+        let global_idx: u32 = (row_start + local_row) * head_dim + local_col;
+
+        let val: f32 = f32::cast_from(input[global_idx as usize][0]);
         let abs_val: f32 = select(val >= 0.0f32, val, -val);
         local_max = select(abs_val > local_max, abs_val, local_max);
-        d += num_units;
+
+        elem_idx += num_units;
     }
 
-    // Reduce across units to get global max
+    // Reduce across units to get global max for the block
     let global_max: f32 = plane_max(local_max);
 
     // Compute scale (avoid division by zero)
     let scale: f32 = select(global_max > 0.0f32, global_max / 127.0f32, 1.0f32);
 
-    // Unit 0 stores the scale
+    // Unit 0 stores the scale for this block
     if unit_id == 0u32 {
-        scales[row_id as usize] = Line::cast_from(scale);
+        scales[block_id as usize] = Line::cast_from(scale);
     }
 
-    // Step 2: Quantize values
+    // Step 2: Quantize all values in the block using the block scale
     let inv_scale: f32 = 1.0f32 / scale;
-    let mut d2: u32 = unit_id;
-    while d2 < head_dim {
-        let idx: usize = (row_base + d2) as usize;
-        let val: f32 = f32::cast_from(input[idx][0]);
+    let mut elem_idx2: u32 = unit_id;
+    while elem_idx2 < block_elems {
+        // Convert block-local index to global index
+        let local_row: u32 = elem_idx2 / head_dim;
+        let local_col: u32 = elem_idx2 % head_dim;
+        let global_idx: u32 = (row_start + local_row) * head_dim + local_col;
+
+        let val: f32 = f32::cast_from(input[global_idx as usize][0]);
         // Round to nearest integer, clamp to [-127, 127]
         let quantized: f32 = (val * inv_scale).round();
         let clamped: f32 = select(quantized > 127.0f32, 127.0f32, quantized);
         let clamped2: f32 = select(clamped < -127.0f32, -127.0f32, clamped);
-        output[idx] = Line::cast_from(clamped2 as i8);
-        d2 += num_units;
+        output[global_idx as usize] = Line::cast_from(clamped2 as i8);
+
+        elem_idx2 += num_units;
     }
 }
 
