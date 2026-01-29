@@ -174,18 +174,9 @@ impl<TC: TileAttentionConfig> PartitionAttentionConfig<TC> {
 pub fn validate<TC: TileAttentionConfig>(
     config: PartitionAttentionConfig<TC>,
 ) -> Result<PartitionAttentionConfig<TC>, AttentionSetupError> {
-    let tile_size = config.shared().tile_config.attention_tile_size();
-    let partition_size = config.shared().partition_size;
-
-    let head_val_different = tile_size.head_dim != tile_size.val_dim
-        || partition_size.head_dim != partition_size.val_dim;
-
-    if head_val_different {
-        return Err(AttentionSetupError::InvalidConfig(Box::new(
-            "Differing head dim and val dim is not yet supported".to_string(),
-        )));
-    }
-
+    // Note: head_dim and val_dim tile/partition sizes CAN differ.
+    // The Q·K^T loop (head_dim) and P×V loop (val_dim) are independent.
+    // INT8 CMMA uses head_dim=32 for Q·K^T (i8 m16n8k32) and val_dim=8 for P×V (f16 m16n8k16).
     Ok(config)
 }
 
