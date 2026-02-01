@@ -1,3 +1,5 @@
+//! Base trait definitions for tile-level attention computation.
+
 use crate::{
     components::tile::{
         FragmentAccumulator, FragmentLayout, FragmentMask, FragmentSoftmax, RowwiseFormat,
@@ -25,9 +27,9 @@ pub(crate) const FULLY_MASKED_ROW_THRESHOLD: f32 = 1e-4;
 pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
     type Config: TileAttentionConfig;
     type Query: CubeType;
-    /// Key fragment type for Q·K^T CMMA. For float: f16. For INT8: i8.
+    /// Key fragment type for Q·K^T. For float: cmma::Matrix<f16>. For INT8: cmma::Matrix<i8>.
     type Key: CubeType;
-    /// Value fragment type for P×V CMMA. For float: f16. For INT8: f16.
+    /// Value fragment type for P×V. For float: cmma::Matrix<f16>. For INT8: cmma::Matrix<f16>.
     type Value: CubeType;
     type Mask: FragmentMask<Layout = Self::FragmentLayout>;
 
@@ -45,7 +47,7 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
     /// For INT8 CMMA: CMMA outputs i32, which is converted to f32 internally.
     ///
     /// The `key_tile` parameter provides raw access to the key data from stage SMEM,
-    /// enabling scalar computation paths that bypass CMMA for reduced sync overhead.
+    /// enabling alternative computation paths.
     fn score_matmul(
         lhs: &Self::Query,
         rhs: &Self::Key,
@@ -54,24 +56,10 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
         #[comptime] config: Self::Config,
     );
 
-    /// Compute Q·K^T using scalar operations with direct LocalTile output.
-    ///
-    /// For INT8 path: reads Q from scalar storage, K from StridedTile,
-    /// writes directly to LocalTile, avoiding CMMA→SMEM→LocalTile conversion.
-    /// This reduces sync count from 2 to 1 per KV tile.
-    ///
-    /// Default implementation calls score_matmul (CMMA path).
-    fn score_matmul_scalar<QE: Numeric>(
-        query_scalar: &Slice<QE>,
-        key_tile: &StridedTile<KS<AP>>,
-        out: &mut Self::Softmax,
-        #[comptime] config: Self::Config,
-    );
-
     /// Compute P×V (softmax × Value) accumulation.
     ///
     /// For float attention: f16 × f16 → f32.
-    /// For INT8 CMMA: f16 × f16 → f32 (V stays f16, not quantized).
+    /// For INT8 path: f16 × f16 → f32 (V stays f16, not quantized).
     fn value_matmul(
         lhs: &Self::Softmax,
         rhs: &Self::Value,

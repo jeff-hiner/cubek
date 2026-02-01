@@ -14,6 +14,7 @@ use cubek_matmul::{
     definition::{LoadingPrecomputeStrategy, MatrixLayout, StageIdent},
 };
 
+
 use crate::{
     components::{
         global::{
@@ -22,7 +23,9 @@ use crate::{
         },
         stage::{StageAttentionConfig as _, StageAttentionFamily},
     },
-    definition::{AttentionBlueprint, AttentionElems, AttentionPrecision, AttentionSetupError},
+    definition::{
+        AttentionBlueprint, AttentionElems, AttentionPrecision, AttentionSetupError,
+    },
 };
 
 pub struct SimpleGlobalAttentionFamily<SA: StageAttentionFamily> {

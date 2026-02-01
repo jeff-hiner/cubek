@@ -58,6 +58,7 @@ pub trait FragmentSoftmax<E: Float>: CubeType {
 }
 
 #[cube]
+/// Trait for row-wise operations on attention score fragments.
 pub trait RowwiseFormat<E: Float> {
     /// How the fragment is fragmented across units
     type Layout: FragmentLayout;
@@ -75,7 +76,7 @@ pub trait RowwiseFormat<E: Float> {
     /// Scale every element by a constant factor, and masks values identified by the mask
     fn scale_and_mask<M: FragmentMask>(this: &mut Self, scale: E, mask: &M);
 
-    /// Changes each value x_ij for e^(x_ij - m_i) for every row
+    /// Changes each value x_ij to e^(x_ij - m_i) for every row.
     fn exp_diff(&mut self, m: &RowWise<E>);
 }
 

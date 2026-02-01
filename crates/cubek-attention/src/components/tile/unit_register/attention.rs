@@ -237,16 +237,6 @@ impl<AP: AttentionPrecision> TileAttention<AP> for UnitRegisterTileAttention {
         unit_inner_matmul(lhs, rhs, out, m, n, k);
     }
 
-    fn score_matmul_scalar<QE: Numeric>(
-        _query_scalar: &Slice<QE>,
-        _key_tile: &StridedTile<KS<AP>>,
-        _out: &mut Self::Softmax,
-        #[comptime] _config: Self::Config,
-    ) {
-        // Unit register is already scalar - this path not used
-        // The regular score_matmul is already optimal for this implementation
-    }
-
     fn value_matmul(
         lhs: &Self::Softmax,
         rhs: &Self::Value,

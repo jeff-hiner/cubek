@@ -12,7 +12,7 @@ use cubecl::{
 type Input<Args, QG, KG, VG, MSK> = <Args as AttentionArgs>::Input<QG, KG, VG, MSK>;
 type Output<Args, OG> = <Args as AttentionArgs>::Output<OG>;
 
-#[cube(launch_unchecked)]
+#[cube(launch, launch_unchecked)]
 /// Launches the attention kernel
 pub(crate) fn attention<
     Args: AttentionArgs,

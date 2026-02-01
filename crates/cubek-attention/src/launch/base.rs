@@ -7,7 +7,8 @@ use crate::definition::{AttentionDims, AttentionGlobalTypes, AttentionOptions, A
 use crate::launch::args::{TensorArgs, TensorInputsLaunch};
 use crate::routines::DeviceSettings;
 use crate::routines::{
-    Routine, blackbox_accelerated::BlackboxAcceleratedRoutine, unit::UnitRoutine,
+    Int8CmmaRoutine, Routine, SageRoutine, blackbox_accelerated::BlackboxAcceleratedRoutine,
+    unit::UnitRoutine,
 };
 
 use crate::components::batch::BatchAttentionFamily;
@@ -24,6 +25,10 @@ pub enum BlueprintStrategy<R: Routine> {
 pub enum Strategy {
     BlackboxAccelerated(BlueprintStrategy<BlackboxAcceleratedRoutine>),
     Unit(BlueprintStrategy<UnitRoutine>),
+    /// SageAttention with proper INT8 quantization and scale handling.
+    Sage(BlueprintStrategy<SageRoutine>),
+    /// INT8 CMMA tensor core attention for Q·K^T using i8×i8→i32.
+    Int8Cmma(BlueprintStrategy<Int8CmmaRoutine>),
 }
 
 #[allow(clippy::result_large_err, clippy::too_many_arguments)]
@@ -88,6 +93,28 @@ pub fn launch_ref<R: Runtime>(
             strategy,
             attention_options,
         ),
+        Strategy::Sage(strategy) => launch_attention::<R, SageRoutine>(
+            client,
+            query,
+            key,
+            value,
+            mask,
+            out,
+            attention_global_types,
+            strategy,
+            attention_options,
+        ),
+        Strategy::Int8Cmma(strategy) => launch_attention::<R, Int8CmmaRoutine>(
+            client,
+            query,
+            key,
+            value,
+            mask,
+            out,
+            attention_global_types,
+            strategy,
+            attention_options,
+        ),
     }
 }
 
@@ -117,11 +144,44 @@ pub fn launch_attention<R: Runtime, A: Routine>(
         options: attention_options,
     };
 
-    let device_settings = DeviceSettings::new(client, &definition);
-    let launch_info = A::prepare(&definition, &device_settings, strategy)?;
+    eprintln!(
+        "[LAUNCH] dims: batch={}, heads={}, seq_q={}, head_dim={}, seq_kv={}, val_dim={}",
+        definition.dims.batch,
+        definition.dims.num_heads,
+        definition.dims.seq_q,
+        definition.dims.head_dim,
+        definition.dims.seq_kv,
+        definition.dims.val_dim
+    );
+    eprintln!(
+        "[LAUNCH] query shape: {:?}, key shape: {:?}, value shape: {:?}, out shape: {:?}",
+        query.shape, key.shape, value.shape, out.shape
+    );
+    eprintln!(
+        "[LAUNCH] dtypes: query={:?}, key={:?}, value={:?}, out={:?}",
+        global_dtypes.query, global_dtypes.key, global_dtypes.value, global_dtypes.out
+    );
 
-    let result = unsafe {
-        <A as Routine>::BatchAttention::launch_unchecked::<TensorArgs, R>(
+    let device_settings = DeviceSettings::new(client, &definition);
+    eprintln!(
+        "[LAUNCH] line_sizes: query={}, key={}, value={}, mask={}, out={}",
+        device_settings.line_sizes.query,
+        device_settings.line_sizes.key,
+        device_settings.line_sizes.value,
+        device_settings.line_sizes.mask,
+        device_settings.line_sizes.out
+    );
+
+    let launch_info = A::prepare(&definition, &device_settings, strategy)?;
+    eprintln!(
+        "[LAUNCH] cube_dim: {:?}, cube_count: {:?}",
+        launch_info.cube_dim,
+        launch_info.cube_count_plan.resolve()
+    );
+    eprintln!("[LAUNCH] dtypes: {:?}", launch_info.dtypes);
+
+    let result = {
+        <A as Routine>::BatchAttention::launch::<TensorArgs, R>(
             client,
             launch_info.cube_dim,
             launch_info.cube_count_plan.resolve(),

@@ -7,5 +7,6 @@
 //! 4. Compute attention·V in FP16
 
 mod attention;
+pub mod setup;
 
 pub use attention::*;

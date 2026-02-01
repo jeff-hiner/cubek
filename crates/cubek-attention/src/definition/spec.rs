@@ -58,6 +58,8 @@ pub trait AttentionPrecision: Send + Sync + Copy + 'static {
     /// For float attention: same as Softmax (e.g., f32).
     /// For INT8 CMMA: i32 (then converted to Softmax type after dequantization).
     type ScoreAccumulator: Numeric;
+    /// Softmax computation type. Uses exp2(score - max) internally since Q's
+    /// quantization scale includes log2(e). All Float types implement Exp2.
     type Softmax: Float;
     type Accumulator: Float;
     type Mask: Numeric;
@@ -439,7 +441,7 @@ impl AttentionElems {
     /// - CMMA computes i8 × i8 → i32 for Q·K^T
     /// - Scores are converted to f32 for softmax
     /// - V stays f16, P×V uses f16 × f16 → f32 CMMA
-    /// - Output is f32
+    /// - Output matches input dtype (f16/bf16), converted from f32 accumulator
     pub fn for_int8_cmma(global_dtypes: &AttentionGlobalTypes) -> AttentionElems {
         use cubecl::ir::{ElemType, FloatKind, IntKind};
         let i8_type = StorageType::Scalar(ElemType::Int(IntKind::I8));
@@ -468,9 +470,9 @@ impl AttentionElems {
             // Output accumulation in f32
             accumulator: f32_type,
             mask: global_dtypes.mask,
-            // Output is f32
-            out_global: f32_type,
-            out_stage: f32_type,
+            // Output matches input dtype (per SageAttention reference)
+            out_global: global_dtypes.out,
+            out_stage: global_dtypes.out,
         }
     }
 

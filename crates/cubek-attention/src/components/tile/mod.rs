@@ -1,4 +1,5 @@
 pub mod accelerated;
+pub mod int8_cmma;
 pub mod sage;
 pub mod unit_register;
 

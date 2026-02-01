@@ -3,8 +3,6 @@
 
 /// Components for matrix multiplication
 pub mod components;
-/// Standalone attention kernels (simpler API)
-pub mod kernels;
 pub mod launch;
 /// Contains attention kernels
 pub mod routines;

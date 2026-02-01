@@ -1069,6 +1069,7 @@ fn partition_kv2_causal() {
         options: AttentionOptions {
             causal: true,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1076,7 +1077,7 @@ fn partition_kv2_causal() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        
+
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
@@ -1454,6 +1455,7 @@ fn one_tile_causal() {
         options: AttentionOptions {
             causal: true,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1461,7 +1463,7 @@ fn one_tile_causal() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        
+
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
@@ -1501,6 +1503,7 @@ fn one_tile_masked_causal() {
         options: AttentionOptions {
             causal: true,
             accumulator_precision: AccumulatorPrecision::default(),
+            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1508,7 +1511,7 @@ fn one_tile_masked_causal() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        
+
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,

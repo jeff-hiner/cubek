@@ -171,7 +171,7 @@ impl<E: Numeric> RowWise<E> {
 
 #[cube]
 impl<E: Float> RowWise<E> {
-    /// Computes e^(self.val - other.val) for every row, and outputs a new RowWise
+    /// Computes e^(self.val - other.val) for every row, and outputs a new RowWise.
     pub fn exp_diff(&self, other: &RowWise<E>) -> RowWise<E> {
         let mut vals = Sequence::new();
 
@@ -186,7 +186,10 @@ impl<E: Float> RowWise<E> {
             vals,
         }
     }
+}
 
+#[cube]
+impl<E: Float> RowWise<E> {
     /// Replaces each value `v` (v >= 0) in a row with `1/v`.
     ///
     /// If `v = 0`, the result is set to `0` instead of `1/0`.

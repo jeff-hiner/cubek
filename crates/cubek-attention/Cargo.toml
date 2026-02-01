@@ -26,7 +26,16 @@ half = { workspace = true, features = ["bytemuck"] }
 serde = { workspace = true }
 
 [dev-dependencies]
-cubecl = { workspace = true, features = ["test-runtime"] }
+cubecl = { workspace = true, features = ["test-runtime", "wgpu-spirv"] }
 cubek-test-utils = { path = "../cubek-test-utils", version = "=0.1.0", default-features = false }
 pretty_assertions = { workspace = true }
 trybuild = "1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(test_runtime_default)',
+    'cfg(test_runtime_wgpu)',
+    'cfg(test_runtime_cpu)',
+    'cfg(test_runtime_cuda)',
+    'cfg(test_runtime_hip)',
+] }

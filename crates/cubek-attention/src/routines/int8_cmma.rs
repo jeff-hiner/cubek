@@ -1,43 +1,29 @@
-//! SageAttention routine - INT8 quantized attention for improved performance
+//! INT8 CMMA routine for hardware-accelerated attention with tensor cores.
 //!
-//! This module provides a SageAttention implementation that:
-//! 1. Takes FP16 Q, K, V tensors
-//! 2. Quantizes Q and K to INT8 with per-block scaling
-//! 3. Computes attention scores using INT8 matmul with proper dequantization
-//! 4. Applies softmax and value multiplication in FP32
-//! 5. Returns FP16 output
-//!
-//! The key difference from BlackboxAccelerated is proper scale handling:
-//! score_f32 = score_i32 * q_scale * k_scale * sm_scale
+//! Uses i8x8->i32 CMMA for Q·K^T and f16xf16->f16 CMMA for P×V.
 
 use cubecl::CubeDim;
-use cubek_matmul::components::CubeDimResource;
 use cubek_matmul::components::{global::PartitionedStageFamily, stage::StridedStageFamily};
 
-use crate::components::stage::unit::UnitPartitionStageAttentionFamily;
-use crate::components::tile::TileAttentionFamily;
-use crate::components::tile::sage::SageTileAttention;
+use crate::components::batch::simple::SimpleBatchAttentionFamily;
+use crate::components::global::simple::SimpleGlobalAttentionFamily;
+use crate::components::stage::plane::PlanePartitionStageAttentionFamily;
+use crate::components::tile::int8_cmma::Int8CmmaTileAttention;
 use crate::definition::{
     AttentionBlueprint, AttentionElems, AttentionPartitionSize, AttentionProblem,
     AttentionSetupError, AttentionStageSize, AttentionTileSize, AttentionTilingScheme,
     HypercubeBlueprint,
 };
 use crate::launch::BlueprintStrategy;
-use crate::routines::{DeviceSettings, LaunchInfo};
-use crate::{
-    components::{
-        batch::simple::SimpleBatchAttentionFamily, global::simple::SimpleGlobalAttentionFamily,
-    },
-    routines::Routine,
-};
+use crate::routines::{DeviceSettings, LaunchInfo, Routine};
 
-/// SageAttention routine marker type
+/// INT8 CMMA routine using tensor cores for Q·K^T computation.
 #[derive(Debug, Clone)]
-pub struct SageRoutine {}
+pub struct Int8CmmaRoutine {}
 
-impl Routine for SageRoutine {
-    type TileAttention = SageTileAttention;
-    type StageAttention = UnitPartitionStageAttentionFamily<
+impl Routine for Int8CmmaRoutine {
+    type TileAttention = Int8CmmaTileAttention;
+    type StageAttention = PlanePartitionStageAttentionFamily<
         Self::TileAttention,
         StridedStageFamily,
         StridedStageFamily,
@@ -56,25 +42,12 @@ impl Routine for SageRoutine {
     ) -> Result<LaunchInfo<Self::Blueprint>, AttentionSetupError> {
         let blueprint = blueprint(problem, device_settings, strategy)?;
 
-        // Use standard float element types for sage (INT8 quantization is internal)
-        let dtypes = AttentionElems::from_global_types(
-            &problem.global_dtypes,
-            &problem.options.accumulator_precision,
-        );
+        // INT8 CMMA always uses specific element types
+        let dtypes = AttentionElems::for_int8_cmma(&problem.global_dtypes);
 
-        let compute_resources = match Self::TileAttention::computation_resources()? {
-            CubeDimResource::Units(units) => {
-                CubeDimResource::Units(units * blueprint.tiling_scheme.stage_size.seq_q)
-            }
-            _ => {
-                return Err(AttentionSetupError::InvalidConfig(Box::new(
-                    "Error: Expected unit tile attention, got a plane tile attention".to_string(),
-                )));
-            }
-        };
-
-        let num_planes = compute_resources.num_planes(blueprint.plane_dim)?;
+        let num_planes = blueprint.tiling_scheme.stage_size.seq_q;
         let cube_dim = CubeDim::new_2d(blueprint.plane_dim, num_planes);
+
         let cube_count_plan = blueprint
             .hypercube_blueprint
             .cube_count_plan(&problem.dims, &blueprint);
@@ -91,44 +64,49 @@ impl Routine for SageRoutine {
 fn blueprint(
     problem: &AttentionProblem,
     launch_settings: &DeviceSettings,
-    strategy: BlueprintStrategy<SageRoutine>,
+    strategy: BlueprintStrategy<Int8CmmaRoutine>,
 ) -> Result<AttentionBlueprint, AttentionSetupError> {
     match strategy {
         BlueprintStrategy::Forced(attention_blueprint) => validate(problem, attention_blueprint),
         BlueprintStrategy::Inferred(_) => {
-            // Use small tile sizes suitable for scalar INT8 computation.
-            // These are similar to UnitRoutine but can be tuned for INT8 performance.
+            // INT8 CMMA tile sizes optimized for tensor core operations
+            // For i8x8->i32 CMMA: m=16, n=16, k=16 or m=8, n=32, k=16
+            // We use seq_q=16, head_dim=32, seq_kv=8 to match common attention patterns
             let tile_size = AttentionTileSize {
-                seq_q: 4,
-                head_dim: 4,
-                seq_kv: 4,
-                val_dim: 4,
+                seq_q: 16,    // m for Q·K^T
+                head_dim: 32, // k for Q·K^T (must be divisible by 16 for CMMA)
+                seq_kv: 8,    // n for Q·K^T
+                val_dim: 8,   // n for P×V
             };
 
             let partition_head_dim = problem.dims.head_dim as u32 / tile_size.head_dim;
-            let partition_val_dim = partition_head_dim;
+            let partition_val_dim = problem.dims.val_dim as u32 / tile_size.val_dim;
 
-            let plane_dim = launch_settings.plane_dim;
+            // Match reference SageAttention block sizes:
+            // - BLOCK_M = 128 query rows per workgroup (8 tiles of 16 rows each)
+            // - BLOCK_N = 64 KV elements per inner loop iteration (8 tiles of 8 KV each)
+            let stage_seq_q = 8;
+            let partition_seq_kv = 8;
 
             let tiling_scheme = AttentionTilingScheme {
                 tile_size,
                 partition_size: AttentionPartitionSize {
                     seq_q: 1,
                     head_dim: partition_head_dim,
-                    seq_kv: 1,
+                    seq_kv: partition_seq_kv,
                     val_dim: partition_val_dim,
                 },
-                stage_size: AttentionStageSize { seq_q: plane_dim },
+                stage_size: AttentionStageSize { seq_q: stage_seq_q },
             };
 
             let blueprint = AttentionBlueprint {
                 hypercube_blueprint: HypercubeBlueprint {},
-                tiling_scheme,
-                plane_dim,
+                plane_dim: launch_settings.plane_dim,
                 two_rows_in_array_tile: false,
                 line_sizes: launch_settings.line_sizes.clone(),
                 masked: problem.masked,
                 causal: problem.options.causal,
+                tiling_scheme,
                 check_bounds: tiling_scheme.check_bounds(&problem.dims),
             };
 
@@ -141,9 +119,16 @@ fn validate(
     problem: &AttentionProblem,
     blueprint: AttentionBlueprint,
 ) -> Result<AttentionBlueprint, AttentionSetupError> {
+    // INT8 CMMA requires head_dim divisible by 16
+    if problem.dims.head_dim as u32 % 16 != 0 {
+        return Err(AttentionSetupError::InvalidConfig(Box::new(
+            "INT8 CMMA requires head_dim divisible by 16",
+        )));
+    }
+
     if problem.dims.head_dim as u32 % blueprint.tiling_scheme.tile_size.head_dim != 0 {
         return Err(AttentionSetupError::InvalidConfig(Box::new(
-            "Tile size head dim must divide problem head dim".to_string(),
+            "Tile size head dim must divide problem head dim",
         )));
     }
 
@@ -151,7 +136,7 @@ fn validate(
         != problem.dims.head_dim as u32
     {
         return Err(AttentionSetupError::InvalidConfig(Box::new(
-            "Tiling scheme's total head dim must equal problem's head dim".to_string(),
+            "Tiling scheme's total head dim must equal problem's head dim",
         )));
     }
 
