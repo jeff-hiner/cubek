@@ -1,17 +1,16 @@
-use cubecl::{Runtime, client::ComputeClient, prelude::TensorHandleRef};
-
-use cubecl::std::tensor::TensorHandle;
-
-use crate::definition::AttentionSetupError;
-use crate::definition::{AttentionDims, AttentionGlobalTypes, AttentionOptions, AttentionProblem};
-use crate::launch::args::{TensorArgs, TensorInputsLaunch};
-use crate::routines::DeviceSettings;
-use crate::routines::{
-    Int8CmmaRoutine, Routine, SageRoutine, blackbox_accelerated::BlackboxAcceleratedRoutine,
-    unit::UnitRoutine,
+use crate::{
+    components::batch::BatchAttentionFamily,
+    definition::{
+        AttentionDims, AttentionGlobalTypes, AttentionOptions, AttentionProblem,
+        AttentionSetupError,
+    },
+    launch::args::{TensorArgs, TensorInputsLaunch},
+    routines::{
+        DeviceSettings, Int8CmmaRoutine, Routine, SageRoutine,
+        blackbox_accelerated::BlackboxAcceleratedRoutine, unit::UnitRoutine,
+    },
 };
-
-use crate::components::batch::BatchAttentionFamily;
+use cubecl::{Runtime, client::ComputeClient, prelude::TensorHandleRef, std::tensor::TensorHandle};
 
 #[derive(Debug, Clone)]
 pub enum BlueprintStrategy<R: Routine> {
@@ -144,41 +143,9 @@ pub fn launch_attention<R: Runtime, A: Routine>(
         options: attention_options,
     };
 
-    eprintln!(
-        "[LAUNCH] dims: batch={}, heads={}, seq_q={}, head_dim={}, seq_kv={}, val_dim={}",
-        definition.dims.batch,
-        definition.dims.num_heads,
-        definition.dims.seq_q,
-        definition.dims.head_dim,
-        definition.dims.seq_kv,
-        definition.dims.val_dim
-    );
-    eprintln!(
-        "[LAUNCH] query shape: {:?}, key shape: {:?}, value shape: {:?}, out shape: {:?}",
-        query.shape, key.shape, value.shape, out.shape
-    );
-    eprintln!(
-        "[LAUNCH] dtypes: query={:?}, key={:?}, value={:?}, out={:?}",
-        global_dtypes.query, global_dtypes.key, global_dtypes.value, global_dtypes.out
-    );
-
     let device_settings = DeviceSettings::new(client, &definition);
-    eprintln!(
-        "[LAUNCH] line_sizes: query={}, key={}, value={}, mask={}, out={}",
-        device_settings.line_sizes.query,
-        device_settings.line_sizes.key,
-        device_settings.line_sizes.value,
-        device_settings.line_sizes.mask,
-        device_settings.line_sizes.out
-    );
 
     let launch_info = A::prepare(client, &definition, &device_settings, strategy)?;
-    eprintln!(
-        "[LAUNCH] cube_dim: {:?}, cube_count: {:?}",
-        launch_info.cube_dim,
-        launch_info.cube_count_plan.resolve()
-    );
-    eprintln!("[LAUNCH] dtypes: {:?}", launch_info.dtypes);
 
     let result = {
         <A as Routine>::BatchAttention::launch::<TensorArgs, R>(
