@@ -172,7 +172,7 @@ pub fn launch_attention<R: Runtime, A: Routine>(
         device_settings.line_sizes.out
     );
 
-    let launch_info = A::prepare(&definition, &device_settings, strategy)?;
+    let launch_info = A::prepare(client, &definition, &device_settings, strategy)?;
     eprintln!(
         "[LAUNCH] cube_dim: {:?}, cube_count: {:?}",
         launch_info.cube_dim,

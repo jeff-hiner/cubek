@@ -2,7 +2,8 @@
 //!
 //! Uses i8x8->i32 CMMA for Q·K^T and f16xf16->f16 CMMA for P×V.
 
-use cubecl::CubeDim;
+use cubecl::client::ComputeClient;
+use cubecl::{CubeDim, Runtime};
 use cubek_matmul::components::{global::PartitionedStageFamily, stage::StridedStageFamily};
 
 use crate::components::batch::simple::SimpleBatchAttentionFamily;
@@ -35,7 +36,8 @@ impl Routine for Int8CmmaRoutine {
     type Strategy = ();
     type Blueprint = AttentionBlueprint;
 
-    fn prepare(
+    fn prepare<R: Runtime>(
+        _client: &ComputeClient<R>,
         problem: &AttentionProblem,
         device_settings: &DeviceSettings,
         strategy: BlueprintStrategy<Self>,

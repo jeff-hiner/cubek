@@ -1,4 +1,5 @@
-use cubecl::CubeDim;
+use cubecl::client::ComputeClient;
+use cubecl::{CubeDim, Runtime};
 use cubek_matmul::components::CubeDimResource;
 use cubek_matmul::components::{global::PartitionedStageFamily, stage::StridedStageFamily};
 
@@ -36,7 +37,8 @@ impl Routine for UnitRoutine {
     type Strategy = ();
     type Blueprint = AttentionBlueprint;
 
-    fn prepare(
+    fn prepare<R: Runtime>(
+        _client: &ComputeClient<R>,
         problem: &AttentionProblem,
         device_settings: &DeviceSettings,
         strategy: BlueprintStrategy<Self>,
