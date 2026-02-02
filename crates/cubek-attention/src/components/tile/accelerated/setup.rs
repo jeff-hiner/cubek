@@ -53,7 +53,7 @@ impl TileAttentionFamily for BlackboxAcceleratedTileAttention {
     type Config = BlackboxAcceleratedAttentionMatmulConfig;
 
     fn requires_accelerator() -> bool {
-        false
+        true
     }
 
     fn computation_resources() -> Result<CubeDimResource, InvalidConfigError> {

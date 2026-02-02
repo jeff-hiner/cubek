@@ -63,10 +63,13 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
         out: &mut Self::Accumulator,
         #[comptime] _config: Self::Config,
     ) {
-        // Float path: f16×f16→f32 CMMA for P×V
-        let lhs = &lhs.fragment;
+        // Cast f32 softmax → f16 for P×V matmul.
+        // SM<AP> is f32 for numerical precision during softmax computation,
+        // but hardware CMMA only supports f16×f16 inputs on most GPUs.
+        let lhs_f16 = cmma::cast::<SM<AP>, VT<AP>>(&lhs.fragment);
         let out = &out.fragment;
-        cmma::execute::<SM<AP>, VT<AP>, ACC<AP>, ACC<AP>>(lhs, rhs, out, out);
+        // f16×f16→f32 CMMA for P×V
+        cmma::execute::<VT<AP>, VT<AP>, ACC<AP>, ACC<AP>>(&lhs_f16, rhs, out, out);
     }
 
     fn allocate_query(#[comptime] config: Self::Config) -> Self::Query {
