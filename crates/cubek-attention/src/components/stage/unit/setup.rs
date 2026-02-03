@@ -128,6 +128,7 @@ impl<
                 key_smem_config,
                 value_smem_config,
                 out_smem_config,
+                original_head_dim: blueprint.original_head_dim,
             },
         }))
     }

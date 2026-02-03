@@ -99,7 +99,7 @@ impl<
             elements_per_tile_along_row: blueprint.tiling_scheme.tile_size.seq_q,
             elements_per_tile_along_col: blueprint.tiling_scheme.tile_size.val_dim,
             tiles_per_partition_along_row: 1,
-            tiles_per_partition_along_col: 1,
+            tiles_per_partition_along_col: blueprint.tiling_scheme.partition_size.val_dim,
             // Each plane has its slot in row direction
             partitions_per_stage_along_row: num_planes,
             partitions_per_stage_along_col: 1,
@@ -119,6 +119,7 @@ impl<
                 key_smem_config,
                 value_smem_config,
                 out_smem_config,
+                original_head_dim: blueprint.original_head_dim,
             },
         }))
     }

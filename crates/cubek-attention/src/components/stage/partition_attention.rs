@@ -141,13 +141,14 @@ impl<
                 // Perform the softmax calculation on the (row-format) softmax tile, including masking
                 // This mutates the (row-format) softmax tile and the state
                 // Also outputs a value needed to scale accumulator later
+                // Use original_head_dim for correct scaling when head_dim is padded for CMMA alignment
                 let scale = tile_softmax::<AP, TA, P::Reducer>(
                     softmax_rowwise,
                     mask_partition.get(),
                     state_q,
                     &mut max_placeholder,
                     &mut sum_placeholder,
-                    p.head_dim * config.tile_config().attention_tile_size().head_dim,
+                    config.shared().original_head_dim,
                     config.tile_config(),
                 );
 
@@ -236,6 +237,11 @@ impl<
                     &mut tile.as_slice_mut(),
                     config.tile_config(),
                 );
+
+                // Sync required: cmma::store is cooperative across units in the plane.
+                // Each unit writes only its portion. Without sync, plane_write may read
+                // from shared memory before all units have completed their stores.
+                sync_cube();
 
                 W::on_event(writer, WriteEvent::new_TileStored(tile_pos));
             }

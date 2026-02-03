@@ -156,6 +156,8 @@ pub struct SharedPartitionAttentionConfig<TC: TileAttentionConfig> {
     pub key_smem_config: StageMemoryConfig,
     pub value_smem_config: StageMemoryConfig,
     pub out_smem_config: StageMemoryConfig,
+    /// Original head_dim before padding, used for correct softmax scale (1/sqrt(original_head_dim)).
+    pub original_head_dim: u32,
 }
 
 impl<TC: TileAttentionConfig> PartitionAttentionConfig<TC> {
@@ -216,7 +218,7 @@ impl<TC: TileAttentionConfig> StageAttentionConfig for PartitionAttentionConfig<
     }
 
     fn elements_in_partition_seq_q(&self) -> u32 {
-        self.shared().partition_size.seq_q * self.elements_in_tile_seq_kv()
+        self.shared().partition_size.seq_q * self.elements_in_tile_seq_q()
     }
 
     fn elements_in_partition_seq_kv(&self) -> u32 {

@@ -54,11 +54,14 @@ pub struct AttentionDims {
     pub seq_q: usize,
     /// Key/Value sequence length
     pub seq_kv: usize,
-    /// Dimension of each head (d)
+    /// Dimension of each head (d). May be padded for CMMA alignment.
     pub head_dim: usize,
-    /// Dimension of each value vector.  
+    /// Dimension of each value vector.
     /// Usually equal to `head_dim`, but may differ in some variants
     pub val_dim: usize,
+    /// Original head_dim before padding, for correct softmax scale (1/sqrt(original_head_dim)).
+    /// If None, uses head_dim.
+    pub original_head_dim: Option<usize>,
 }
 
 impl AttentionDims {
