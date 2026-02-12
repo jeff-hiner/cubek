@@ -1,6 +1,6 @@
 //! INT8 CMMA routine for hardware-accelerated attention with tensor cores.
 //!
-//! Uses i8x8->i32 CMMA for Q·K^T and f16xf16->f16 CMMA for P×V.
+//! Uses i8×i8→i32 CMMA for Q·K^T and f16×f16→f32 CMMA for P×V.
 
 use cubecl::client::ComputeClient;
 use cubecl::features::MmaConfig;
@@ -128,24 +128,34 @@ fn blueprint<R: Runtime>(
                 }
             })?;
 
+            eprintln!(
+                "[DEBUG Int8Cmma] tile_size: seq_q={}, seq_kv={}, head_dim={}, val_dim={}",
+                tile_size.seq_q, tile_size.seq_kv, tile_size.head_dim, tile_size.val_dim
+            );
+            eprintln!(
+                "[DEBUG Int8Cmma] problem dims: batch={}, heads={}, seq_q={}, seq_kv={}, head_dim={}, val_dim={}",
+                problem.dims.batch, problem.dims.num_heads, problem.dims.seq_q, problem.dims.seq_kv,
+                problem.dims.head_dim, problem.dims.val_dim
+            );
+            eprintln!(
+                "[DEBUG Int8Cmma] plane_dim={}, original_head_dim={:?}",
+                launch_settings.plane_dim, problem.dims.original_head_dim
+            );
+
             let partition_head_dim = problem.dims.head_dim as u32 / tile_size.head_dim;
             let partition_val_dim = problem.dims.val_dim as u32 / tile_size.val_dim;
 
-            // Compute stage and partition sizes based on tile dimensions
-            // Target ~128 query rows per workgroup (BLOCK_M in reference)
-            let stage_seq_q = (128 / tile_size.seq_q).max(1);
-            // Target ~64 KV elements per inner loop (BLOCK_N in reference)
-            let partition_seq_kv = (64 / tile_size.seq_kv).max(1);
-
+            // Use simple single-plane approach like f16 CMMA (BlackboxAccelerated)
+            // This simplifies coordination and matches the working implementation
             let tiling_scheme = AttentionTilingScheme {
                 tile_size,
                 partition_size: AttentionPartitionSize {
                     seq_q: 1,
                     head_dim: partition_head_dim,
-                    seq_kv: partition_seq_kv,
+                    seq_kv: 1,
                     val_dim: partition_val_dim,
                 },
-                stage_size: AttentionStageSize { seq_q: stage_seq_q },
+                stage_size: AttentionStageSize { seq_q: 1 },
             };
 
             // Use original_head_dim if provided (for padded tensors), otherwise use head_dim

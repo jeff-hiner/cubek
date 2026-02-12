@@ -1,6 +1,6 @@
 //! INT8 CMMA tile attention implementation.
 //!
-//! Uses i8×i8→i32 CMMA for Q·K^T and f16×f16→f32 CMMA for P×V.
+//! Uses i8×i8→i32 CMMA for Q·K^T (with per-tile quantization) and f16×f16→f32 CMMA for P×V.
 
 use cubecl::{self, prelude::*};
 use cubek_matmul::components::tile::StridedTile;
@@ -15,7 +15,12 @@ use crate::definition::AttentionPrecision;
 use crate::definition::attention_types::{ACC, KS, MSK, SM};
 
 /// log2(e) constant for converting exp to exp2 in softmax
+#[expect(dead_code, reason = "will be used when proper quantization is implemented")]
 const LOG2_E: f32 = std::f32::consts::LOG2_E;
+
+/// Minimum scale value to avoid division by zero during quantization.
+/// Using 1e-6 as a small but non-zero value.
+const MIN_QUANT_SCALE: f32 = 1e-6;
 
 /// INT8 CMMA tile attention implementation.
 ///
@@ -50,6 +55,9 @@ pub struct Int8QueryTile {
     pub scale: f32,
     /// Layout info for loading
     pub layout: Int8TileLayout,
+    /// Number of planes for per-plane SharedMemory allocation.
+    #[cube(comptime)]
+    pub num_planes: u32,
 }
 
 /// Key tile with INT8 quantization for CMMA.
@@ -61,19 +69,33 @@ pub struct Int8KeyTile {
     pub scale: f32,
     /// Layout info for loading
     pub layout: Int8TileLayout,
+    /// Number of planes for per-plane SharedMemory allocation.
+    #[cube(comptime)]
+    pub num_planes: u32,
 }
 
 /// Softmax fragment that handles i32→E conversion after INT8 CMMA.
 /// Generic over E: Float to satisfy trait bounds for all precisions.
 #[derive(CubeType)]
 pub struct Int8CmmaSoftmax<E: Float> {
-    /// CMMA fragment for softmax computation and P×V matmul input.
+    /// CMMA fragment for softmax computation and P×V matmul input (f32).
     pub fragment: cmma::Matrix<E>,
-    /// Shared memory slice for this plane's softmax tile.
+    /// i32 accumulator for Q·K^T CMMA. Persists across head_dim partitions.
+    pub acc_i32: cmma::Matrix<i32>,
+    /// Combined quantization scale (q_scale * k_scale) to apply after all partitions.
+    pub combined_scale: f32,
+    /// Shared memory slice for this plane's softmax tile (f32).
     smem_slice: SliceMut<E>,
+    /// Shared memory slice for i32 accumulator storage.
+    /// Needed because acc_i32 has K=head_dim layout, but fragment needs K=seq_kv.
+    /// We store i32 to SMEM, then convert element-wise to avoid CMMA layout mismatch.
+    smem_i32_slice: SliceMut<i32>,
     /// Local tile for row-wise operations.
     local_tile: LocalTile<E>,
-    /// Stride for SMEM layout.
+    /// Number of rows in the softmax tile (seq_q).
+    #[cube(comptime)]
+    seq_q: u32,
+    /// Stride for SMEM layout (= seq_kv).
     #[cube(comptime)]
     stride: u32,
 }
@@ -85,8 +107,21 @@ impl<E: Float> Int8CmmaSoftmax<E> {
         #[comptime] seq_kv: u32,
         #[comptime] config: Int8CmmaAttentionConfig,
     ) -> Self {
+        // f32 fragment used as A matrix in value_matmul (P×V)
+        // P is [seq_q, seq_kv], so K=seq_kv for the P×V operation
         let fragment = unsafe {
             cmma::Matrix::<E>::uninitialized(
+                cmma::MatrixIdent::Accumulator,
+                seq_q as usize,
+                seq_kv as usize,
+                seq_kv as usize, // K=seq_kv for value_matmul
+                cmma::MatrixLayout::RowMajor,
+            )
+        };
+
+        // i32 accumulator for Q·K^T CMMA - K=head_dim
+        let acc_i32 = unsafe {
+            cmma::Matrix::<i32>::uninitialized(
                 cmma::MatrixIdent::Accumulator,
                 seq_q as usize,
                 seq_kv as usize,
@@ -105,6 +140,8 @@ impl<E: Float> Int8CmmaSoftmax<E> {
 
         let smem_slot_size = seq_q * seq_kv;
         let smem_slice_start = UNIT_POS_Y * smem_slot_size;
+
+        // f32 shared memory for softmax values
         let mut shared_memory =
             SharedMemory::new(config.shared.num_planes as usize * smem_slot_size as usize);
         let smem_slice = shared_memory.slice_mut(
@@ -112,16 +149,34 @@ impl<E: Float> Int8CmmaSoftmax<E> {
             (smem_slice_start + smem_slot_size) as usize,
         );
 
+        // i32 shared memory for acc_i32 storage.
+        // We need separate i32 SMEM because acc_i32 has K=head_dim CMMA layout,
+        // but self.fragment needs K=seq_kv. Storing i32 to SMEM then converting
+        // element-wise to f32 avoids the CMMA fragment layout mismatch.
+        let mut shared_memory_i32 =
+            SharedMemory::<i32>::new(config.shared.num_planes as usize * smem_slot_size as usize);
+        let smem_i32_slice = shared_memory_i32.slice_mut(
+            smem_slice_start as usize,
+            (smem_slice_start + smem_slot_size) as usize,
+        );
+
         Int8CmmaSoftmax::<E> {
             fragment,
+            acc_i32,
+            combined_scale: 1.0f32,
             smem_slice,
+            smem_i32_slice,
             local_tile,
+            seq_q,
             stride: seq_kv,
         }
     }
 
     fn zero(&mut self) {
+        // Zero both the f32 fragment and the i32 accumulator
         cmma::fill(&self.fragment, E::from_int(0));
+        cmma::fill(&self.acc_i32, 0i32);
+        self.combined_scale = 1.0f32;
     }
 }
 
@@ -133,12 +188,33 @@ impl<E: Float> FragmentSoftmax<E> for Int8CmmaSoftmax<E> {
     type SoftmaxVal = cmma::Matrix<E>;
 
     fn rowwise_mut(&mut self) -> &mut Self::SoftmaxRowFormat {
+        // Store acc_i32 directly to i32 SMEM.
+        // This uses acc_i32's native K=head_dim CMMA layout correctly.
         cmma::store(
-            &mut self.smem_slice,
-            &self.fragment,
+            &mut self.smem_i32_slice,
+            &self.acc_i32,
             self.stride,
             cmma::MatrixLayout::RowMajor,
         );
+
+        sync_cube();
+
+        // Convert i32 → f32 element-wise in SMEM and apply quantization scale.
+        // This avoids CMMA layout mismatch: acc_i32 (K=head_dim) vs fragment (K=seq_kv).
+        // Element-wise conversion has no CMMA layout dependencies.
+        let seq_q = comptime!(self.seq_q);
+        let stride = comptime!(self.stride);
+        let num_elements = seq_q * stride;
+        let elements_per_thread = (num_elements + 31) / 32;
+        let scale = E::cast_from(self.combined_scale);
+        for i in 0..elements_per_thread {
+            let idx = UNIT_POS_X + i * 32;
+            if idx < num_elements {
+                // Read i32 from i32 SMEM, convert to f32, apply scale, write to f32 SMEM
+                let i32_val = self.smem_i32_slice[idx as usize];
+                self.smem_slice[idx as usize] = E::cast_from(i32_val) * scale;
+            }
+        }
 
         sync_cube();
 
@@ -307,155 +383,38 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
         rhs: &Self::Key,
         _key_tile: &StridedTile<KS<AP>>,
         out: &mut Self::Softmax,
-        #[comptime] config: Self::Config,
+        #[comptime] _config: Self::Config,
     ) {
-        // INT8 CMMA path: i8×i8→i32, then dequantize to SM<AP>
-        let size = config.attention_tile_size();
-
-        // Create temporary i32 accumulator for CMMA output
-        let i32_acc = unsafe {
-            cmma::Matrix::<i32>::uninitialized(
-                cmma::MatrixIdent::Accumulator,
-                size.seq_q as usize,
-                size.seq_kv as usize,
-                size.head_dim as usize,
-                cmma::MatrixLayout::RowMajor,
-            )
-        };
-        cmma::fill(&i32_acc, 0i32);
-
-        // Execute i8×i8→i32 CMMA
-        cmma::execute::<i8, i8, i32, i32>(&lhs.fragment, &rhs.fragment, &i32_acc, &i32_acc);
-
-        // Combined scale for dequantization: q_scale * k_scale
-        let combined_scale = lhs.scale * rhs.scale;
-
-        // Store i32 results to SMEM, dequantize to softmax type
-        // We need to go through SMEM because we can't directly convert CMMA fragments
-        let smem_slot_size = size.seq_q * size.seq_kv;
-        let smem_slice_start = UNIT_POS_Y * smem_slot_size;
-        let mut i32_smem = SharedMemory::<i32>::new(
-            config.shared.num_planes as usize * smem_slot_size as usize,
-        );
-        let mut i32_slice = i32_smem.slice_mut(
-            smem_slice_start as usize,
-            (smem_slice_start + smem_slot_size) as usize,
+        // Accumulate Q·K^T using i8×i8→i32 CMMA into the persistent accumulator.
+        // This is called multiple times for head_dim partitions; results accumulate.
+        cmma::execute::<i8, i8, i32, i32>(
+            &lhs.fragment,
+            &rhs.fragment,
+            &out.acc_i32,
+            &out.acc_i32,
         );
 
-        cmma::store(&mut i32_slice, &i32_acc, size.seq_kv, cmma::MatrixLayout::RowMajor);
-
-        sync_cube();
-
-        // Dequantize: read i32 from SMEM, apply scale, write to output SMEM
-        let num_elements = smem_slot_size / config.shared.plane_dim;
-        let start_idx = UNIT_POS_X * num_elements;
-
-        for i in 0..num_elements {
-            let idx = start_idx + i;
-            let i32_val = i32_slice.to_slice()[idx as usize];
-            // Dequantize: i32 -> f32 -> SM<AP>
-            let f32_val = f32::cast_from(i32_val) * combined_scale;
-            out.smem_slice[idx as usize] = SM::<AP>::cast_from(f32_val);
-        }
-
-        sync_cube();
-
-        // Load dequantized values into CMMA fragment
-        cmma::load_with_layout(
-            &out.fragment,
-            &out.smem_slice.to_slice(),
-            size.seq_kv,
-            cmma::MatrixLayout::RowMajor,
-        );
+        // Store the quantization scale (same for all partitions with fixed scale)
+        // Scale is applied once in rowwise_mut after all partitions complete
+        out.combined_scale = lhs.scale * rhs.scale;
     }
 
     fn value_matmul(
         lhs: &Self::Softmax,
         rhs: &Self::Value,
         out: &mut Self::Accumulator,
-        #[comptime] config: Self::Config,
+        #[comptime] _config: Self::Config,
     ) {
-        // Reference pattern: p = p.to(tl.float16); acc += tl.dot(p, v, out_dtype=tl.float16)
-        // Use f16×f16→f16 CMMA (less register pressure), then add to ACC<AP> accumulator
-        //
-        // TODO: Minimize SMEM sync overhead. Currently we:
-        //   1. Store ACC<AP> acc to SMEM
-        //   2. Store f16 result to SMEM
-        //   3. Add in registers (via f32 intermediate)
-        //   4. Reload ACC<AP> acc
-        // Could potentially pipeline or restructure to reduce syncs.
-        let size = config.attention_tile_size();
+        // P×V uses f16×f16→f32 CMMA (same as BlackboxAccelerated)
+        // Cast softmax (SM<AP>, likely f32) to f16 for CMMA input
+        let lhs_f16 = cmma::cast::<SM<AP>, half::f16>(&lhs.fragment);
 
-        // Cast softmax SM<AP> → f16 for P×V matmul
-        // Note: SM<AP> is expected to be f32 for all defined precisions
-        let p_f16 = cmma::cast::<SM<AP>, half::f16>(&lhs.fragment);
-
-        // Create zero f16 accumulator for the dot product
-        let zero_f16 = unsafe {
-            cmma::Matrix::<half::f16>::uninitialized(
-                cmma::MatrixIdent::Accumulator,
-                size.seq_q as usize,
-                size.val_dim as usize,
-                size.seq_kv as usize,
-                cmma::MatrixLayout::RowMajor,
-            )
-        };
-        cmma::fill(&zero_f16, half::f16::ZERO);
-
-        // Execute f16×f16→f16 CMMA (reference: out_dtype=tl.float16)
-        let pv_f16 = unsafe {
-            cmma::Matrix::<half::f16>::uninitialized(
-                cmma::MatrixIdent::Accumulator,
-                size.seq_q as usize,
-                size.val_dim as usize,
-                size.seq_kv as usize,
-                cmma::MatrixLayout::RowMajor,
-            )
-        };
-        cmma::execute::<half::f16, half::f16, half::f16, half::f16>(&p_f16, rhs, &zero_f16, &pv_f16);
-
-        // Store f16 result to SMEM, then add to ACC<AP> accumulator
-        // First, store current ACC<AP> accumulator to SMEM
-        cmma::store(
-            &mut out.smem_slice,
+        // Execute f16×f16→f32 CMMA for P×V
+        cmma::execute::<half::f16, half::f16, ACC<AP>, ACC<AP>>(
+            &lhs_f16,
+            rhs,
             &out.fragment,
-            out.stride,
-            cmma::MatrixLayout::RowMajor,
-        );
-
-        sync_cube();
-
-        // Store f16 result to separate SMEM, convert and add
-        let smem_slot_size = size.seq_q * size.val_dim;
-        let mut f16_smem = SharedMemory::<half::f16>::new(smem_slot_size as usize);
-        let mut f16_slice = f16_smem.slice_mut(0, smem_slot_size as usize);
-        cmma::store(&mut f16_slice, &pv_f16, size.val_dim, cmma::MatrixLayout::RowMajor);
-
-        sync_cube();
-
-        // Add f16 values to the ACC<AP> accumulator in SMEM
-        // We go through f32 intermediate for the addition, then back to ACC<AP>
-        let num_elements = smem_slot_size / config.shared.plane_dim;
-        let start_idx = UNIT_POS_X * num_elements;
-
-        for i in 0..num_elements {
-            let idx = start_idx + i;
-            let f16_val = f16_slice.to_slice()[idx as usize];
-            let f16_as_f32 = f32::cast_from(f16_val);
-            // Read current ACC<AP> value, convert to f32, add, convert back
-            let current = f32::cast_from(out.smem_slice[idx as usize]);
-            let new_val = current + f16_as_f32;
-            out.smem_slice[idx as usize] = ACC::<AP>::cast_from(new_val);
-        }
-
-        sync_cube();
-
-        // Reload ACC<AP> accumulator from SMEM
-        cmma::load_with_layout(
             &out.fragment,
-            &out.smem_slice.to_slice(),
-            out.stride,
-            cmma::MatrixLayout::RowMajor,
         );
     }
 
@@ -474,6 +433,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
             fragment,
             scale: 1.0f32,
             layout: Int8TileLayout::new(size.seq_q, size.head_dim),
+            num_planes: config.shared.num_planes,
         }
     }
 
@@ -492,6 +452,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
             fragment,
             scale: 1.0f32,
             layout: Int8TileLayout::new(size.head_dim, size.seq_kv),
+            num_planes: config.shared.num_planes,
         }
     }
 
@@ -528,54 +489,84 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
     }
 
     fn load_query<E: Numeric>(tile: &StridedTile<E>, fragment: &mut Self::Query) {
-        // Quantize float input to INT8 with sm_scale baked in
-        // Get dimensions from fragment layout (set during allocation)
-        let num_rows = comptime!(fragment.layout.num_rows);
-        let num_cols = comptime!(fragment.layout.num_cols);
+        let num_rows = comptime!(fragment.layout.num_rows); // seq_q
+        let num_cols = comptime!(fragment.layout.num_cols); // head_dim
+        let num_planes = comptime!(fragment.num_planes);
 
-        // Compute sm_scale = (1/√head_dim) * log2(e)
-        // This bakes in attention temperature and exp→exp2 conversion
-        let head_dim_f32 = comptime!(num_cols as f32);
-        let sm_scale = f32::recip(f32::sqrt(head_dim_f32)) * LOG2_E;
+        let smem_slot_size = num_rows * num_cols;
+        let smem_slice_start = UNIT_POS_Y * smem_slot_size;
+        let mut smem = SharedMemory::<i8>::new(num_planes as usize * smem_slot_size as usize);
 
-        // First pass: find max(abs(val * sm_scale)) for quantization scale
-        // Using flat array iteration for simplicity
-        let (slice, stride) = tile.as_unlined();
-        let mut max_abs = 0.0f32;
-        for row in 0..num_rows {
-            for col in 0..num_cols {
-                let idx = row * stride + col;
-                let val = f32::cast_from(slice[idx as usize]) * sm_scale;
-                let abs_val = f32::abs(val);
-                max_abs = f32::max(max_abs, abs_val);
-            }
+        // Get the tile slice - use get_line for strided access
+        let elements_per_thread = comptime!((smem_slot_size + 31) / 32);
+
+        // === PHASE 1: Find max absolute value using plane_max ===
+        // Each thread computes local max over its assigned elements.
+        // Use a fixed iteration count with bounds masking to ensure uniform control flow.
+        let mut local_max_abs = 0.0f32;
+
+        #[unroll]
+        for i in 0..elements_per_thread {
+            let linear_idx = UNIT_POS_X + i * 32;
+            // Compute (row, col) position in the tile
+            let row = linear_idx / num_cols;
+            let col = linear_idx % num_cols;
+            // Use get_line for proper strided access (handles swizzle too)
+            // get_line takes (strided_coord, contiguous_coord). For row-major: strided=row.
+            let in_bounds = linear_idx < smem_slot_size;
+            let safe_row = select(in_bounds, row, 0u32);
+            let safe_col = select(in_bounds, col, 0u32);
+            let line = tile.get_line(safe_row, safe_col / tile.line_size);
+            let val = f32::cast_from(line[(col % tile.line_size) as usize]);
+            // Mask OOB values to 0 for max reduction
+            let masked_abs = select(in_bounds, f32::abs(val), 0.0f32);
+            local_max_abs = f32::max(local_max_abs, masked_abs);
         }
 
-        // Compute quantization scale
-        let quant_scale = max_abs / 127.0 + 1e-10;
-        fragment.scale = quant_scale;
-        let inv_scale = 1.0 / quant_scale;
+        // Reduce across plane using warp-level plane_max
+        let tile_max_abs = plane_max(local_max_abs);
 
-        // Second pass: quantize and load into SMEM for CMMA loading
-        let total_elements = comptime!(num_rows * num_cols);
-        let mut i8_smem = SharedMemory::<i8>::new(total_elements as usize);
-        let mut i8_slice = i8_smem.slice_mut(0, total_elements as usize);
+        // Compute scale: scale = max_abs / 127 (for dequantization)
+        let scale = f32::max(tile_max_abs / 127.0f32, MIN_QUANT_SCALE);
+        fragment.scale = scale;
+        let inv_scale = 127.0f32 / f32::max(tile_max_abs, MIN_QUANT_SCALE);
 
-        for row in 0..num_rows {
-            for col in 0..num_cols {
-                let src_idx = row * stride + col;
-                let dst_idx = row * num_cols + col;
-                let val = f32::cast_from(slice[src_idx as usize]) * sm_scale;
+        // DEBUG Stage 1: Print Q quantization info (first cube, first thread only)
+        if CUBE_POS == 0 && UNIT_POS_X == 0 && UNIT_POS_Y == 0 {
+            // Read a sample value for debugging
+            let sample_line = tile.get_line(0u32, 0u32);
+            let sample_val = f32::cast_from(sample_line[0]);
+            let sample_quant = f32::round(sample_val * inv_scale);
+            println!(
+                "[Stage1 Q] max_abs={}, scale={}, inv_scale={}, sample_val={}, sample_quant={}",
+                tile_max_abs,
+                scale,
+                inv_scale,
+                sample_val,
+                sample_quant
+            );
+        }
+
+        // === PHASE 2: Quantize using dynamic scale ===
+        #[unroll]
+        for i in 0..elements_per_thread {
+            let linear_idx = UNIT_POS_X + i * 32;
+            if linear_idx < smem_slot_size {
+                let row = linear_idx / num_cols;
+                let col = linear_idx % num_cols;
+                // Use get_line for proper strided access
+                let line = tile.get_line(row, col / tile.line_size);
+                let val = f32::cast_from(line[(col % tile.line_size) as usize]);
                 let quantized = f32::round(val * inv_scale);
-                let clamped = clamp(quantized, -127.0, 127.0);
-                i8_slice[dst_idx as usize] = i8::cast_from(clamped);
+                let clamped = f32::clamp(quantized, -127.0f32, 127.0f32);
+                smem[(smem_slice_start + linear_idx) as usize] = i8::cast_from(clamped);
             }
         }
-
         sync_cube();
 
-        // Load quantized data into CMMA fragment
-        cmma::load(&fragment.fragment, &i8_slice.to_slice(), num_cols);
+        let smem_slice =
+            smem.slice(smem_slice_start as usize, (smem_slice_start + smem_slot_size) as usize);
+        cmma::load(&fragment.fragment, &smem_slice, num_cols);
     }
 
     fn load_key_transposed<E: Numeric>(
@@ -583,49 +574,84 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
         fragment: &mut Self::Key,
         #[comptime] _config: Self::Config,
     ) {
-        // Quantize float input to INT8 (K is not pre-scaled with sm_scale)
-        // Key layout: (head_dim, seq_kv) for Q·K^T
-        let num_rows = comptime!(fragment.layout.num_rows);
-        let num_cols = comptime!(fragment.layout.num_cols);
+        // Fragment expects K^T: [head_dim, seq_kv] = [K, N]
+        let k_dim = comptime!(fragment.layout.num_rows); // head_dim = 32
+        let n_dim = comptime!(fragment.layout.num_cols); // seq_kv = 16
+        let num_planes = comptime!(fragment.num_planes);
 
-        // First pass: find max(abs(val)) for quantization scale
-        let (slice, stride) = tile.as_unlined();
-        let mut max_abs = 0.0f32;
-        for row in 0..num_rows {
-            for col in 0..num_cols {
-                let idx = row * stride + col;
-                let val = f32::cast_from(slice[idx as usize]);
-                let abs_val = f32::abs(val);
-                max_abs = f32::max(max_abs, abs_val);
-            }
+        // Source K tile is [seq_kv, head_dim] = [N, K] = [16, 32]
+        let src_cols = k_dim; // head_dim (contiguous dimension)
+        let src_size = n_dim * k_dim;
+
+        let smem_slot_size = k_dim * n_dim;
+        let smem_slice_start = UNIT_POS_Y * smem_slot_size;
+        let mut smem = SharedMemory::<i8>::new(num_planes as usize * smem_slot_size as usize);
+
+        let elements_per_thread = comptime!((src_size + 31) / 32);
+
+        // === PHASE 1: Find max absolute value using plane_max ===
+        let mut local_max_abs = 0.0f32;
+
+        #[unroll]
+        for i in 0..elements_per_thread {
+            let linear_idx = UNIT_POS_X + i * 32;
+            // Compute (row, col) in source K tile [seq_kv, head_dim]
+            let src_row = linear_idx / src_cols; // seq_kv dimension (strided)
+            let src_col = linear_idx % src_cols; // head_dim dimension (contiguous)
+            // Use get_line for proper strided access
+            let in_bounds = linear_idx < src_size;
+            let safe_row = select(in_bounds, src_row, 0u32);
+            let safe_col = select(in_bounds, src_col, 0u32);
+            let line = tile.get_line(safe_row, safe_col / tile.line_size);
+            let val = f32::cast_from(line[(safe_col % tile.line_size) as usize]);
+            // Mask OOB values to 0 for max reduction
+            let masked_abs = select(in_bounds, f32::abs(val), 0.0f32);
+            local_max_abs = f32::max(local_max_abs, masked_abs);
         }
 
-        // Compute quantization scale
-        let quant_scale = max_abs / 127.0 + 1e-10;
-        fragment.scale = quant_scale;
-        let inv_scale = 1.0 / quant_scale;
+        // Reduce across plane using warp-level plane_max
+        let tile_max_abs = plane_max(local_max_abs);
 
-        // Second pass: quantize and load into SMEM for CMMA loading
-        // Note: K is loaded transposed (head_dim, seq_kv) for Q·K^T
-        let total_elements = comptime!(num_rows * num_cols);
-        let mut i8_smem = SharedMemory::<i8>::new(total_elements as usize);
-        let mut i8_slice = i8_smem.slice_mut(0, total_elements as usize);
+        let scale = f32::max(tile_max_abs / 127.0f32, MIN_QUANT_SCALE);
+        fragment.scale = scale;
+        let inv_scale = 127.0f32 / f32::max(tile_max_abs, MIN_QUANT_SCALE);
 
-        for row in 0..num_rows {
-            for col in 0..num_cols {
-                let src_idx = row * stride + col;
-                let dst_idx = row * num_cols + col;
-                let val = f32::cast_from(slice[src_idx as usize]);
+        // DEBUG Stage 2: Print K quantization info (first cube, first thread only)
+        if CUBE_POS == 0 && UNIT_POS_X == 0 && UNIT_POS_Y == 0 {
+            let sample_line = tile.get_line(0u32, 0u32);
+            let sample_val = f32::cast_from(sample_line[0]);
+            let sample_quant = f32::round(sample_val * inv_scale);
+            println!(
+                "[Stage2 K] max_abs={}, scale={}, inv_scale={}, sample_val={}, sample_quant={}",
+                tile_max_abs,
+                scale,
+                inv_scale,
+                sample_val,
+                sample_quant
+            );
+        }
+
+        // === PHASE 2: Quantize using dynamic scale ===
+        #[unroll]
+        for i in 0..elements_per_thread {
+            let linear_idx = UNIT_POS_X + i * 32;
+            if linear_idx < src_size {
+                let src_row = linear_idx / src_cols;
+                let src_col = linear_idx % src_cols;
+                // Use get_line for proper strided access
+                let line = tile.get_line(src_row, src_col / tile.line_size);
+                let val = f32::cast_from(line[(src_col % tile.line_size) as usize]);
                 let quantized = f32::round(val * inv_scale);
-                let clamped = clamp(quantized, -127.0, 127.0);
-                i8_slice[dst_idx as usize] = i8::cast_from(clamped);
+                let clamped = f32::clamp(quantized, -127.0f32, 127.0f32);
+
+                smem[(smem_slice_start + linear_idx) as usize] = i8::cast_from(clamped);
             }
         }
-
         sync_cube();
 
-        // Load quantized data into CMMA fragment
-        cmma::load(&fragment.fragment, &i8_slice.to_slice(), num_cols);
+        let smem_slice =
+            smem.slice(smem_slice_start as usize, (smem_slice_start + smem_slot_size) as usize);
+        cmma::load(&fragment.fragment, &smem_slice, k_dim);
     }
 
     fn load_value<E: Numeric>(
@@ -633,7 +659,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
         fragment: &mut Self::Value,
         #[comptime] _config: Self::Config,
     ) {
-        // V stays f16, no quantization
+        // Value stays as f16 for P×V matmul (no quantization)
         let (slice, stride) = tile.as_unlined();
         cmma::load(fragment, &slice, stride);
     }
