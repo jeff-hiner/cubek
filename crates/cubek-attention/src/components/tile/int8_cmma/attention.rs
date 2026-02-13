@@ -6,7 +6,10 @@ use crate::{
     components::tile::{
         FragmentAccumulator, FragmentAccumulatorExpand, FragmentSoftmax, FragmentSoftmaxExpand,
         RowWise, TileAttention, TileAttentionConfig as _,
-        accelerated::local_tile::{LocalTile, LocalTileLayout},
+        accelerated::{
+            exp2_local_tile::Exp2LocalTile,
+            local_tile::{LocalTile, LocalTileLayout},
+        },
         int8_cmma::setup::Int8CmmaAttentionConfig,
     },
     definition::{
@@ -17,12 +20,8 @@ use crate::{
 use cubecl::{self, prelude::*};
 use cubek_matmul::components::tile::StridedTile;
 
-/// log2(e) constant for converting exp to exp2 in softmax
-#[expect(
-    dead_code,
-    reason = "will be used when proper quantization is implemented"
-)]
-const LOG2_E: f32 = std::f32::consts::LOG2_E;
+// Note: LOG2_E is now applied during Q quantization in launch/base.rs,
+// and exp2() is used in Exp2LocalTile::exp_diff() for the softmax computation.
 
 /// INT8 CMMA tile attention implementation.
 ///
@@ -78,6 +77,9 @@ pub struct Int8KeyTile {
 
 /// Softmax fragment that handles i32→E conversion after INT8 CMMA.
 /// Generic over E: Float to satisfy trait bounds for all precisions.
+///
+/// Uses `Exp2LocalTile` for softmax computation because INT8 CMMA bakes
+/// `log2(e)` into Q quantization, enabling: `exp(x) = exp2(x * log2(e))`.
 #[derive(CubeType)]
 pub struct Int8CmmaSoftmax<E: Float> {
     /// CMMA fragment for softmax computation and P×V matmul input (f32).
@@ -92,8 +94,9 @@ pub struct Int8CmmaSoftmax<E: Float> {
     /// Needed because acc_i32 has K=head_dim layout, but fragment needs K=seq_kv.
     /// We store i32 to SMEM, then convert element-wise to avoid CMMA layout mismatch.
     smem_i32_slice: SliceMut<i32>,
-    /// Local tile for row-wise operations.
-    local_tile: LocalTile<E>,
+    /// Local tile for row-wise operations using exp2() for softmax.
+    /// Uses Exp2LocalTile because log2(e) is baked into Q quantization.
+    local_tile: Exp2LocalTile<E>,
     /// Number of rows in the softmax tile (seq_q).
     #[cube(comptime)]
     seq_q: u32,
@@ -141,7 +144,8 @@ impl<E: Float> Int8CmmaSoftmax<E> {
             config.inner_layout,
         );
 
-        let local_tile = LocalTile::new(array_tile_layout);
+        // Use Exp2LocalTile because INT8 CMMA bakes log2(e) into Q quantization
+        let local_tile = Exp2LocalTile::new(array_tile_layout);
 
         let smem_slot_size = seq_q * seq_kv;
         let smem_slice_start = UNIT_POS_Y * smem_slot_size;
@@ -189,7 +193,7 @@ impl<E: Float> Int8CmmaSoftmax<E> {
 impl<E: Float> FragmentSoftmax<E> for Int8CmmaSoftmax<E> {
     type Layout = LocalTileLayout;
     type SoftmaxScore = cmma::Matrix<E>;
-    type SoftmaxRowFormat = LocalTile<E>;
+    type SoftmaxRowFormat = Exp2LocalTile<E>;
     type SoftmaxVal = cmma::Matrix<E>;
 
     fn set_combined_scale(&mut self, scale: f32) {
@@ -369,8 +373,8 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
     type Mask = LocalTile<MSK<AP>>;
     /// Softmax fragment using the precision's softmax type
     type Softmax = Int8CmmaSoftmax<SM<AP>>;
-    /// Softmax row format using the precision's softmax type
-    type SoftmaxRow = LocalTile<SM<AP>>;
+    /// Softmax row format using exp2() for INT8 CMMA (log2(e) baked into Q)
+    type SoftmaxRow = Exp2LocalTile<SM<AP>>;
     /// Accumulator using the precision's accumulator type
     type Accumulator = Int8CmmaAccumulator<ACC<AP>>;
 

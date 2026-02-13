@@ -2,23 +2,26 @@
 //!
 //! Uses i8×i8→i32 CMMA for Q·K^T and f16×f16→f32 CMMA for P×V.
 
-use cubecl::client::ComputeClient;
-use cubecl::features::MmaConfig;
-use cubecl::ir::{ElemType, IntKind, StorageType};
-use cubecl::{CubeDim, Runtime};
-use cubek_matmul::components::{global::PartitionedStageFamily, stage::StridedStageFamily};
-
-use crate::components::batch::simple::SimpleBatchAttentionFamily;
-use crate::components::global::simple::SimpleGlobalAttentionFamily;
-use crate::components::stage::plane::PlanePartitionStageAttentionFamily;
-use crate::components::tile::int8_cmma::Int8CmmaTileAttention;
-use crate::definition::{
-    AttentionAvailabilityError, AttentionBlueprint, AttentionElems, AttentionPartitionSize,
-    AttentionProblem, AttentionSetupError, AttentionStageSize, AttentionTileSize,
-    AttentionTilingScheme, HypercubeBlueprint,
+use crate::{
+    components::{
+        batch::simple::SimpleBatchAttentionFamily, global::simple::SimpleGlobalAttentionFamily,
+        stage::plane::PlanePartitionStageAttentionFamily, tile::int8_cmma::Int8CmmaTileAttention,
+    },
+    definition::{
+        AttentionAvailabilityError, AttentionBlueprint, AttentionElems, AttentionPartitionSize,
+        AttentionProblem, AttentionSetupError, AttentionStageSize, AttentionTileSize,
+        AttentionTilingScheme, HypercubeBlueprint,
+    },
+    launch::BlueprintStrategy,
+    routines::{DeviceSettings, LaunchInfo, Routine},
 };
-use crate::launch::BlueprintStrategy;
-use crate::routines::{DeviceSettings, LaunchInfo, Routine};
+use cubecl::{
+    CubeDim, Runtime,
+    client::ComputeClient,
+    features::MmaConfig,
+    ir::{ElemType, IntKind, StorageType},
+};
+use cubek_matmul::components::{global::PartitionedStageFamily, stage::StridedStageFamily};
 
 /// INT8 CMMA routine using tensor cores for Q·K^T computation.
 #[derive(Debug, Clone)]
@@ -77,9 +80,7 @@ impl Routine for Int8CmmaRoutine {
 /// - head_dim = k (inner dimension)
 /// - seq_kv = n (KV elements per tile)
 /// - val_dim = n (same as seq_kv for simplicity)
-fn find_int8_cmma_tile_size<R: Runtime>(
-    client: &ComputeClient<R>,
-) -> Option<AttentionTileSize> {
+fn find_int8_cmma_tile_size<R: Runtime>(client: &ComputeClient<R>) -> Option<AttentionTileSize> {
     let cmma_configs = &client.properties().features.cmma;
 
     let i8_type = StorageType::Scalar(ElemType::Int(IntKind::I8));
@@ -97,10 +98,10 @@ fn find_int8_cmma_tile_size<R: Runtime>(
         };
         if cmma_configs.contains(&config) {
             return Some(AttentionTileSize {
-                seq_q: m,     // M dimension (query rows)
-                head_dim: k,  // K dimension (inner/head dim)
-                seq_kv: n,    // N dimension (KV elements)
-                val_dim: n,   // Use same N for value matmul
+                seq_q: m,    // M dimension (query rows)
+                head_dim: k, // K dimension (inner/head dim)
+                seq_kv: n,   // N dimension (KV elements)
+                val_dim: n,  // Use same N for value matmul
             });
         }
     }
@@ -128,20 +129,6 @@ fn blueprint<R: Runtime>(
                 },
             )?;
 
-            eprintln!(
-                "[DEBUG Int8Cmma] tile_size: seq_q={}, seq_kv={}, head_dim={}, val_dim={}",
-                tile_size.seq_q, tile_size.seq_kv, tile_size.head_dim, tile_size.val_dim
-            );
-            eprintln!(
-                "[DEBUG Int8Cmma] problem dims: batch={}, heads={}, seq_q={}, seq_kv={}, head_dim={}, val_dim={}",
-                problem.dims.batch, problem.dims.num_heads, problem.dims.seq_q, problem.dims.seq_kv,
-                problem.dims.head_dim, problem.dims.val_dim
-            );
-            eprintln!(
-                "[DEBUG Int8Cmma] plane_dim={}, original_head_dim={:?}",
-                launch_settings.plane_dim, problem.dims.original_head_dim
-            );
-
             let partition_head_dim = problem.dims.head_dim as u32 / tile_size.head_dim;
             let partition_val_dim = problem.dims.val_dim as u32 / tile_size.val_dim;
 
@@ -158,11 +145,11 @@ fn blueprint<R: Runtime>(
                 stage_size: AttentionStageSize { seq_q: 1 },
             };
 
-            // Use original_head_dim if provided (for padded tensors), otherwise use head_dim
-            let original_head_dim = problem
-                .dims
-                .original_head_dim
-                .unwrap_or(problem.dims.head_dim) as u32;
+            // For INT8 CMMA, sm_scale (1/sqrt(head_dim)) is baked into Q quantization
+            // following SageAttention. Setting original_head_dim=1 makes the softmax
+            // scale = 1/sqrt(1) = 1.0, avoiding double-scaling.
+            // The actual original_head_dim is still used in the quantization step.
+            let original_head_dim = 1;
 
             let blueprint = AttentionBlueprint {
                 hypercube_blueprint: HypercubeBlueprint {},

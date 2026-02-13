@@ -11,8 +11,13 @@ use crate::{
         blackbox_accelerated::BlackboxAcceleratedRoutine, unit::UnitRoutine,
     },
 };
-use cubecl::ir::{ElemType, FloatKind, IntKind, StorageType};
-use cubecl::{Runtime, client::ComputeClient, prelude::TensorHandleRef, std::tensor::TensorHandle};
+use cubecl::{
+    Runtime,
+    client::ComputeClient,
+    ir::{ElemType, FloatKind, IntKind, StorageType},
+    prelude::TensorHandleRef,
+    std::tensor::TensorHandle,
+};
 
 #[derive(Debug, Clone)]
 pub enum BlueprintStrategy<R: Routine> {
@@ -225,7 +230,8 @@ pub fn launch_int8_attention<R: Runtime>(
     // Extract block sizes from the blueprint's tiling scheme.
     // These determine how many blocks per head for scale tensors.
     let tiling = &launch_info.blueprint.tiling_scheme;
-    let q_block_size = tiling.tile_size.seq_q * tiling.partition_size.seq_q * tiling.stage_size.seq_q;
+    let q_block_size =
+        tiling.tile_size.seq_q * tiling.partition_size.seq_q * tiling.stage_size.seq_q;
     let k_block_size = tiling.tile_size.seq_kv * tiling.partition_size.seq_kv;
     let num_q_blocks = (query.shape[2] as u32).div_ceil(q_block_size) as usize;
     let num_k_blocks = (key.shape[2] as u32).div_ceil(k_block_size) as usize;
@@ -292,9 +298,158 @@ pub fn launch_int8_attention<R: Runtime>(
         block_size: k_block_size,
     };
 
+    // Compute softmax scale:
+    // - Q is quantized with sm_scale = (1/sqrt(original_head_dim)) * log2(e) baked in
+    // - K is quantized without sm_scale (uses 1.0)
+    // - The log2(e) factor enables using exp2() in softmax: exp2(x * log2(e)) = exp(x)
+    // - This matches SageAttention's approach for INT8 quantization
+    let original_head_dim = definition
+        .dims
+        .original_head_dim
+        .unwrap_or(definition.dims.head_dim);
+    let sm_scale = (1.0 / (original_head_dim as f32).sqrt()) * std::f32::consts::LOG2_E;
+
     // Quantize Q and K based on input dtype (using per-block quantization)
-    quantize_tensor_per_block(client, query, &q_i8.as_ref(), &q_scale.as_ref(), &q_config, global_dtypes.query);
-    quantize_tensor_per_block(client, key, &k_i8.as_ref(), &k_scale.as_ref(), &k_config, global_dtypes.key);
+    // Q gets sm_scale baked in, K uses 1.0
+    quantize_tensor_per_block(
+        client,
+        query,
+        &q_i8.as_ref(),
+        &q_scale.as_ref(),
+        &q_config,
+        global_dtypes.query,
+        sm_scale,
+    );
+    quantize_tensor_per_block(
+        client,
+        key,
+        &k_i8.as_ref(),
+        &k_scale.as_ref(),
+        &k_config,
+        global_dtypes.key,
+        1.0,
+    );
+
+    // DEBUG: Print scale values to verify quantization
+    let debug_enabled = std::env::var("DEBUG_INT8_CMMA").is_ok();
+    if debug_enabled {
+        eprintln!("\n[DEBUG Int8Cmma] === Quantization Debug ===");
+        eprintln!("[DEBUG Int8Cmma] Problem dimensions:");
+        eprintln!(
+            "[DEBUG Int8Cmma]   batch={}, num_heads={}",
+            query.shape[0], query.shape[1]
+        );
+        eprintln!(
+            "[DEBUG Int8Cmma]   seq_q={}, seq_kv={}, head_dim={}",
+            query.shape[2], key.shape[2], query.shape[3]
+        );
+        eprintln!(
+            "[DEBUG Int8Cmma]   original_head_dim={} (for quantization)",
+            original_head_dim
+        );
+        eprintln!(
+            "[DEBUG Int8Cmma]   blueprint.original_head_dim={} (for softmax)",
+            launch_info.blueprint.original_head_dim
+        );
+        eprintln!("[DEBUG Int8Cmma] Block sizes:");
+        eprintln!(
+            "[DEBUG Int8Cmma]   q_block_size={}, k_block_size={}",
+            q_block_size, k_block_size
+        );
+        eprintln!(
+            "[DEBUG Int8Cmma]   num_q_blocks_per_head={}, num_k_blocks_per_head={}",
+            num_q_blocks, num_k_blocks
+        );
+        eprintln!(
+            "[DEBUG Int8Cmma]   total_q_scales={}, total_k_scales={}",
+            q_scale_total, k_scale_total
+        );
+        eprintln!("[DEBUG Int8Cmma] Scale computation:");
+        eprintln!(
+            "[DEBUG Int8Cmma]   sm_scale = 1/sqrt({}) = {}",
+            original_head_dim, sm_scale
+        );
+
+        let q_scale_bytes = client.read_one(q_scale.handle.clone());
+        let q_scales: &[f32] = bytemuck::cast_slice(&q_scale_bytes);
+        eprintln!(
+            "[DEBUG Int8Cmma] Q scales (first 10): {:?}",
+            &q_scales[..10.min(q_scales.len())]
+        );
+        if q_scales.len() > 10 {
+            eprintln!(
+                "[DEBUG Int8Cmma] Q scales (last 5): {:?}",
+                &q_scales[q_scales.len().saturating_sub(5)..]
+            );
+        }
+
+        let k_scale_bytes = client.read_one(k_scale.handle.clone());
+        let k_scales: &[f32] = bytemuck::cast_slice(&k_scale_bytes);
+        eprintln!(
+            "[DEBUG Int8Cmma] K scales (first 10): {:?}",
+            &k_scales[..10.min(k_scales.len())]
+        );
+        if k_scales.len() > 10 {
+            eprintln!(
+                "[DEBUG Int8Cmma] K scales (last 5): {:?}",
+                &k_scales[k_scales.len().saturating_sub(5)..]
+            );
+        }
+
+        // Show combined scale for first few block pairs
+        eprintln!("[DEBUG Int8Cmma] Combined scales (q_scale * k_scale) for first head:");
+        for (q_blk, q_scale_val) in q_scales.iter().enumerate().take(num_q_blocks.min(3)) {
+            for (k_blk, k_scale_val) in k_scales.iter().enumerate().take(num_k_blocks.min(3)) {
+                let combined = q_scale_val * k_scale_val;
+                eprintln!(
+                    "[DEBUG Int8Cmma]   q_block={}, k_block={} -> combined_scale={}",
+                    q_blk, k_blk, combined
+                );
+            }
+        }
+
+        // Verify quantized values
+        let q_i8_bytes = client.read_one(q_i8.handle.clone());
+        let q_i8_vals: &[i8] = bytemuck::cast_slice(&q_i8_bytes);
+        let q_i8_first_row = &q_i8_vals[..query.shape[3].min(32)];
+        eprintln!(
+            "[DEBUG Int8Cmma] Q_i8 first row (first 32): {:?}",
+            q_i8_first_row
+        );
+
+        let k_i8_bytes = client.read_one(k_i8.handle.clone());
+        let k_i8_vals: &[i8] = bytemuck::cast_slice(&k_i8_bytes);
+        let k_i8_first_row = &k_i8_vals[..key.shape[3].min(32)];
+        eprintln!(
+            "[DEBUG Int8Cmma] K_i8 first row (first 32): {:?}",
+            k_i8_first_row
+        );
+
+        // Compute expected i32 dot product for first Q row and first K row
+        let first_q_row: Vec<i32> = q_i8_first_row.iter().map(|&x| x as i32).collect();
+        let first_k_row: Vec<i32> = k_i8_first_row.iter().map(|&x| x as i32).collect();
+        let expected_i32_dot: i32 = first_q_row
+            .iter()
+            .zip(first_k_row.iter())
+            .map(|(a, b)| a * b)
+            .sum();
+        let expected_f32_score = expected_i32_dot as f32 * q_scales[0] * k_scales[0];
+        eprintln!("[DEBUG Int8Cmma] Expected dot product (Q[0] · K[0]):");
+        eprintln!("[DEBUG Int8Cmma]   i32 sum = {}", expected_i32_dot);
+        eprintln!(
+            "[DEBUG Int8Cmma]   combined_scale = {} * {} = {}",
+            q_scales[0],
+            k_scales[0],
+            q_scales[0] * k_scales[0]
+        );
+        eprintln!(
+            "[DEBUG Int8Cmma]   f32 score = {} * {} = {}",
+            expected_i32_dot,
+            q_scales[0] * k_scales[0],
+            expected_f32_score
+        );
+        eprintln!("[DEBUG Int8Cmma] === End Quantization Debug ===\n");
+    }
 
     // Launch attention with pre-quantized inputs
     let result = {
@@ -303,7 +458,8 @@ pub fn launch_int8_attention<R: Runtime>(
             launch_info.cube_dim,
             launch_info.cube_count_plan.resolve(),
             Int8TensorInputsLaunch::new(
-                q_i8.as_ref().as_tensor_arg(device_settings.line_sizes.query),
+                q_i8.as_ref()
+                    .as_tensor_arg(device_settings.line_sizes.query),
                 q_scale.as_ref().as_tensor_arg(1),
                 k_i8.as_ref().as_tensor_arg(device_settings.line_sizes.key),
                 k_scale.as_ref().as_tensor_arg(1),
@@ -318,6 +474,54 @@ pub fn launch_int8_attention<R: Runtime>(
             launch_info.blueprint,
         )
     };
+
+    // DEBUG: Print output values after kernel execution
+    if debug_enabled && result.is_ok() {
+        eprintln!("\n[DEBUG Int8Cmma] === Post-Kernel Debug ===");
+        let out_bytes = client.read_one(out.handle.clone());
+
+        // Determine output element size based on dtype
+        let elem_size = match global_dtypes.out {
+            StorageType::Scalar(ElemType::Float(FloatKind::F16)) => 2,
+            StorageType::Scalar(ElemType::Float(FloatKind::BF16)) => 2,
+            StorageType::Scalar(ElemType::Float(FloatKind::F32)) => 4,
+            _ => 4,
+        };
+
+        let out_vals: Vec<f32> = if elem_size == 2 {
+            // f16 or bf16 - convert to f32
+            let out_f16: &[half::f16] = bytemuck::cast_slice(&out_bytes);
+            out_f16.iter().map(|x| x.to_f32()).collect()
+        } else {
+            bytemuck::cast_slice(&out_bytes).to_vec()
+        };
+
+        // Print first row of output
+        let val_dim = definition.dims.val_dim;
+        let first_row = &out_vals[..val_dim.min(32)];
+        eprintln!(
+            "[DEBUG Int8Cmma] Output first row (first 32): {:?}",
+            first_row
+        );
+
+        // Check for NaN/Inf
+        let nan_count = out_vals.iter().filter(|x| x.is_nan()).count();
+        let inf_count = out_vals.iter().filter(|x| x.is_infinite()).count();
+        eprintln!(
+            "[DEBUG Int8Cmma] Output NaN count: {}, Inf count: {}",
+            nan_count, inf_count
+        );
+
+        // Compute output statistics
+        let out_min = out_vals.iter().cloned().fold(f32::INFINITY, f32::min);
+        let out_max = out_vals.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let out_mean = out_vals.iter().sum::<f32>() / out_vals.len() as f32;
+        eprintln!(
+            "[DEBUG Int8Cmma] Output stats: min={}, max={}, mean={}",
+            out_min, out_max, out_mean
+        );
+        eprintln!("[DEBUG Int8Cmma] === End Post-Kernel Debug ===\n");
+    }
 
     match result {
         Ok(_) => Ok(()),
@@ -335,6 +539,9 @@ fn compute_contiguous_strides(shape: &[usize]) -> Vec<usize> {
 }
 
 /// Dispatch per-block quantization based on input dtype.
+///
+/// Following SageAttention, `sm_scale` is baked into the quantization.
+/// For Q, this is typically 1/sqrt(head_dim). For K, this is 1.0.
 fn quantize_tensor_per_block<R: Runtime>(
     client: &ComputeClient<R>,
     input: &TensorHandleRef<R>,
@@ -342,18 +549,23 @@ fn quantize_tensor_per_block<R: Runtime>(
     scales: &TensorHandleRef<R>,
     config: &QuantizeConfig,
     dtype: StorageType,
+    sm_scale: f32,
 ) {
     use cubecl::ir::{ElemType, FloatKind};
 
     match dtype {
         StorageType::Scalar(ElemType::Float(FloatKind::F16)) => {
-            launch_quantize_per_block::<R, half::f16>(client, input, output, scales, config);
+            launch_quantize_per_block::<R, half::f16>(
+                client, input, output, scales, config, sm_scale,
+            );
         }
         StorageType::Scalar(ElemType::Float(FloatKind::BF16)) => {
-            launch_quantize_per_block::<R, half::bf16>(client, input, output, scales, config);
+            launch_quantize_per_block::<R, half::bf16>(
+                client, input, output, scales, config, sm_scale,
+            );
         }
         StorageType::Scalar(ElemType::Float(FloatKind::F32)) => {
-            launch_quantize_per_block::<R, f32>(client, input, output, scales, config);
+            launch_quantize_per_block::<R, f32>(client, input, output, scales, config, sm_scale);
         }
         _ => panic!("Unsupported input dtype for INT8 CMMA quantization: {dtype:?}"),
     }

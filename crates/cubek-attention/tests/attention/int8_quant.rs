@@ -1,7 +1,6 @@
 //! Unit tests for INT8 quantization used in INT8 CMMA attention.
 
-use cubecl::prelude::*;
-use cubecl::{CubeCount, CubeDim, Runtime, TestRuntime};
+use cubecl::{CubeCount, CubeDim, Runtime, TestRuntime, prelude::*};
 use cubek_attention::components::tile::accelerated::local_tile::{
     InnerLayout, LocalTile, LocalTileLayout,
 };
@@ -65,7 +64,12 @@ fn test_quantize_roundtrip() {
     let output_i8: Vec<i8> = output_bytes.iter().map(|&b| b as i8).collect();
 
     let scale_bytes = client.read_one(scale_out);
-    let scale = f32::from_ne_bytes([scale_bytes[0], scale_bytes[1], scale_bytes[2], scale_bytes[3]]);
+    let scale = f32::from_ne_bytes([
+        scale_bytes[0],
+        scale_bytes[1],
+        scale_bytes[2],
+        scale_bytes[3],
+    ]);
 
     println!("Input: {:?}", input_data);
     println!("Quantized i8: {:?}", output_i8);
@@ -128,7 +132,12 @@ fn test_quantize_memory_layout() {
     let output_i8: Vec<i8> = output_bytes.iter().map(|&b| b as i8).collect();
 
     let scale_bytes = client.read_one(scale_out);
-    let scale = f32::from_ne_bytes([scale_bytes[0], scale_bytes[1], scale_bytes[2], scale_bytes[3]]);
+    let scale = f32::from_ne_bytes([
+        scale_bytes[0],
+        scale_bytes[1],
+        scale_bytes[2],
+        scale_bytes[3],
+    ]);
 
     println!("Input (row-major 4x4): {:?}", input_data);
     println!("Quantized i8: {:?}", output_i8);
@@ -147,10 +156,23 @@ fn test_quantize_memory_layout() {
         let col = i % 4;
         println!(
             "  [{},{}] (linear {}) input={:.0} expected_q={} actual_q={} {}",
-            row, col, i, input_data[i], expected_quantized, actual,
-            if expected_quantized == actual { "OK" } else { "MISMATCH!" }
+            row,
+            col,
+            i,
+            input_data[i],
+            expected_quantized,
+            actual,
+            if expected_quantized == actual {
+                "OK"
+            } else {
+                "MISMATCH!"
+            }
         );
-        assert_eq!(actual, expected_quantized, "Mismatch at position [{},{}]", row, col);
+        assert_eq!(
+            actual, expected_quantized,
+            "Mismatch at position [{},{}]",
+            row, col
+        );
     }
 }
 
@@ -184,7 +206,12 @@ fn test_quantize_negative_values() {
     let output_i8: Vec<i8> = output_bytes.iter().map(|&b| b as i8).collect();
 
     let scale_bytes = client.read_one(scale_out);
-    let scale = f32::from_ne_bytes([scale_bytes[0], scale_bytes[1], scale_bytes[2], scale_bytes[3]]);
+    let scale = f32::from_ne_bytes([
+        scale_bytes[0],
+        scale_bytes[1],
+        scale_bytes[2],
+        scale_bytes[3],
+    ]);
 
     println!("Input: {:?}", input_data);
     println!("Quantized i8: {:?}", output_i8);
@@ -192,13 +219,33 @@ fn test_quantize_negative_values() {
 
     // Verify signs are preserved
     for (i, (&input_val, &quant_val)) in input_data.iter().zip(output_i8.iter()).enumerate() {
-        let input_sign = if input_val > 0.0 { 1 } else if input_val < 0.0 { -1 } else { 0 };
-        let quant_sign = if quant_val > 0 { 1 } else if quant_val < 0 { -1 } else { 0 };
+        let input_sign = if input_val > 0.0 {
+            1
+        } else if input_val < 0.0 {
+            -1
+        } else {
+            0
+        };
+        let quant_sign = if quant_val > 0 {
+            1
+        } else if quant_val < 0 {
+            -1
+        } else {
+            0
+        };
 
         println!(
             "  [{}] input={:+.2} (sign={:+}) -> quant={:+} (sign={:+}) {}",
-            i, input_val, input_sign, quant_val, quant_sign,
-            if input_sign == quant_sign { "OK" } else { "SIGN MISMATCH!" }
+            i,
+            input_val,
+            input_sign,
+            quant_val,
+            quant_sign,
+            if input_sign == quant_sign {
+                "OK"
+            } else {
+                "SIGN MISMATCH!"
+            }
         );
         assert_eq!(input_sign, quant_sign, "Sign mismatch at index {}", i);
     }
@@ -230,10 +277,10 @@ fn test_quantize_negative_values() {
 /// - Output: [M, N] = [16, 16]
 #[cube(launch)]
 fn i8_cmma_matmul_kernel(
-    q_i8: &Array<i8>,       // [16, 32] row-major
-    k_i8: &Array<i8>,       // [16, 32] row-major (stored as K, loaded as K^T via ColMajor)
-    q_scale: &Array<f32>,   // scalar
-    k_scale: &Array<f32>,   // scalar
+    q_i8: &Array<i8>,        // [16, 32] row-major
+    k_i8: &Array<i8>,        // [16, 32] row-major (stored as K, loaded as K^T via ColMajor)
+    q_scale: &Array<f32>,    // scalar
+    k_scale: &Array<f32>,    // scalar
     output: &mut Array<f32>, // [16, 16] row-major
     #[comptime] tile_m: u32,
     #[comptime] tile_n: u32,
@@ -283,7 +330,12 @@ fn i8_cmma_matmul_kernel(
     // Store i32 result to shared memory, then convert to f32 with dequant scale
     let smem_size = comptime!(tile_m * tile_n);
     let mut smem_i32 = SharedMemory::<i32>::new(smem_size as usize);
-    cmma::store(&mut smem_i32.slice_mut(0, smem_size as usize), &acc_i32, tile_n, cmma::MatrixLayout::RowMajor);
+    cmma::store(
+        &mut smem_i32.slice_mut(0, smem_size as usize),
+        &acc_i32,
+        tile_n,
+        cmma::MatrixLayout::RowMajor,
+    );
 
     sync_cube();
 
@@ -307,8 +359,10 @@ fn test_i8_cmma_matmul() {
 
     // Check if i8×i8→i32 CMMA is available
     let cmma_configs = &client.properties().features.cmma;
-    let i8_type = cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Int(cubecl::ir::IntKind::I8));
-    let i32_type = cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Int(cubecl::ir::IntKind::I32));
+    let i8_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Int(cubecl::ir::IntKind::I8));
+    let i32_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Int(cubecl::ir::IntKind::I32));
 
     // Try to find an available i8×i8→i32 config
     // Intel Arc uses (8, 16, 32), NVIDIA may use (16, 8, 32) or (16, 16, 32)
@@ -337,7 +391,10 @@ fn test_i8_cmma_matmul() {
         }
     };
 
-    println!("Using i8×i8→i32 CMMA config: M={}, N={}, K={}", tile_m, tile_n, tile_k);
+    println!(
+        "Using i8×i8→i32 CMMA config: M={}, N={}, K={}",
+        tile_m, tile_n, tile_k
+    );
 
     // Dimensions match the CMMA tile size for a single-tile test
     let m = tile_m as usize;
@@ -389,8 +446,14 @@ fn test_i8_cmma_matmul() {
         .collect();
 
     println!("\nQuantization:");
-    println!("  Q: max_abs={}, scale={}, inv_scale={}", q_max_abs, q_scale, q_inv_scale);
-    println!("  K: max_abs={}, scale={}, inv_scale={}", k_max_abs, k_scale, k_inv_scale);
+    println!(
+        "  Q: max_abs={}, scale={}, inv_scale={}",
+        q_max_abs, q_scale, q_inv_scale
+    );
+    println!(
+        "  K: max_abs={}, scale={}, inv_scale={}",
+        k_max_abs, k_scale, k_inv_scale
+    );
     println!("  Combined scale: {}", q_scale * k_scale);
     println!("  Q_i8 (first row): {:?}", &q_i8[0..k]);
     println!("  K_i8 (first row): {:?}", &k_i8[0..k]);
@@ -407,7 +470,10 @@ fn test_i8_cmma_matmul() {
             reference[i * n + j] = sum;
         }
     }
-    println!("\nCPU reference Q @ K^T (first row): {:?}", &reference[0..n]);
+    println!(
+        "\nCPU reference Q @ K^T (first row): {:?}",
+        &reference[0..n]
+    );
 
     // Create GPU buffers
     let q_i8_handle = client.create_from_slice(bytemuck::cast_slice(&q_i8));
@@ -427,9 +493,9 @@ fn test_i8_cmma_matmul() {
             ArrayArg::from_raw_parts::<f32>(&q_scale_handle, 1, 1),
             ArrayArg::from_raw_parts::<f32>(&k_scale_handle, 1, 1),
             ArrayArg::from_raw_parts::<f32>(&output_handle, m * n, 1),
-            m as u32,  // tile_m
-            n as u32,  // tile_n
-            k as u32,  // tile_k
+            m as u32, // tile_m
+            n as u32, // tile_n
+            k as u32, // tile_k
         )
         .unwrap();
     }
@@ -482,7 +548,10 @@ fn test_i8_cmma_matmul() {
     let rel_tolerance = 0.025; // 2.5% relative error
     let abs_tolerance = q_scale + k_scale; // Absolute floor for near-zero values
 
-    println!("Tolerance: rel={:.4}, abs={:.6}", rel_tolerance, abs_tolerance);
+    println!(
+        "Tolerance: rel={:.4}, abs={:.6}",
+        rel_tolerance, abs_tolerance
+    );
 
     // Check that results match within tolerance
     let mut all_pass = true;
@@ -509,7 +578,10 @@ fn test_i8_cmma_matmul() {
         }
     }
 
-    assert!(all_pass, "Some values exceeded tolerance - see above for details");
+    assert!(
+        all_pass,
+        "Some values exceeded tolerance - see above for details"
+    );
 
     println!("\nTest PASSED: i8×i8→i32 CMMA matmul matches CPU reference within tolerance");
 }
@@ -548,11 +620,7 @@ fn softmax_roundtrip_kernel(
     sync_cube();
 
     // Create LocalTile with the same layout as INT8 CMMA attention uses
-    let layout = LocalTileLayout::new(
-        (seq_q, seq_kv),
-        plane_dim,
-        InnerLayout::Contiguous,
-    );
+    let layout = LocalTileLayout::new((seq_q, seq_kv), plane_dim, InnerLayout::Contiguous);
     let mut local_tile = LocalTile::<f32>::new(layout);
 
     // Stage 6: Load from SMEM to LocalTile
@@ -619,7 +687,8 @@ fn test_softmax_roundtrip() {
 
     // Check if f32 CMMA is available (needed for the fragment operations)
     let cmma_configs = &client.properties().features.cmma;
-    let f32_type = cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Float(cubecl::ir::FloatKind::F32));
+    let f32_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Float(cubecl::ir::FloatKind::F32));
 
     // Try to find an f32 accumulator config
     let mut found_config: Option<(u32, u32, u32)> = None;
@@ -644,11 +713,16 @@ fn test_softmax_roundtrip() {
     let seq_kv = 16u32;
     let plane_dim = 32u32;
 
-    println!("Testing softmax roundtrip with seq_q={}, seq_kv={}", seq_q, seq_kv);
+    println!(
+        "Testing softmax roundtrip with seq_q={}, seq_kv={}",
+        seq_q, seq_kv
+    );
     if let Some((m, n, k)) = found_config {
         println!("Found f32 CMMA config: M={}, N={}, K={}", m, n, k);
     } else {
-        println!("No f32×f32→f32 CMMA config found, but testing anyway (Accumulator might work differently)");
+        println!(
+            "No f32×f32→f32 CMMA config found, but testing anyway (Accumulator might work differently)"
+        );
     }
 
     // Create test data: values that look like softmax probabilities
@@ -665,8 +739,10 @@ fn test_softmax_roundtrip() {
 
     // Create GPU buffers
     let input_handle = client.create_from_slice(f32::as_bytes(&input_data));
-    let output_localtile_handle = client.empty((seq_q * seq_kv) as usize * core::mem::size_of::<f32>());
-    let output_fragment_handle = client.empty((seq_q * seq_kv) as usize * core::mem::size_of::<f32>());
+    let output_localtile_handle =
+        client.empty((seq_q * seq_kv) as usize * core::mem::size_of::<f32>());
+    let output_fragment_handle =
+        client.empty((seq_q * seq_kv) as usize * core::mem::size_of::<f32>());
 
     // Launch kernel
     unsafe {
@@ -691,8 +767,14 @@ fn test_softmax_roundtrip() {
     let output_fragment_bytes = client.read_one(output_fragment_handle);
     let output_fragment: Vec<f32> = bytemuck::cast_slice(&output_fragment_bytes).to_vec();
 
-    println!("After LocalTile round-trip (first row): {:?}", &output_localtile[0..seq_kv as usize]);
-    println!("After Fragment round-trip (first row): {:?}", &output_fragment[0..seq_kv as usize]);
+    println!(
+        "After LocalTile round-trip (first row): {:?}",
+        &output_localtile[0..seq_kv as usize]
+    );
+    println!(
+        "After Fragment round-trip (first row): {:?}",
+        &output_fragment[0..seq_kv as usize]
+    );
 
     // Verify LocalTile round-trip
     println!("\nLocalTile round-trip verification:");
@@ -704,7 +786,10 @@ fn test_softmax_roundtrip() {
         if error > 1e-6 {
             let row = i / seq_kv as usize;
             let col = i % seq_kv as usize;
-            println!("  MISMATCH at [{},{}]: expected={}, actual={}, error={}", row, col, expected, actual, error);
+            println!(
+                "  MISMATCH at [{},{}]: expected={}, actual={}, error={}",
+                row, col, expected, actual, error
+            );
             localtile_ok = false;
         }
     }
@@ -724,7 +809,10 @@ fn test_softmax_roundtrip() {
         if error > 1e-5 {
             let row = i / seq_kv as usize;
             let col = i % seq_kv as usize;
-            println!("  MISMATCH at [{},{}]: expected={}, actual={}, error={}", row, col, expected, actual, error);
+            println!(
+                "  MISMATCH at [{},{}]: expected={}, actual={}, error={}",
+                row, col, expected, actual, error
+            );
             fragment_ok = false;
         }
     }
@@ -734,7 +822,10 @@ fn test_softmax_roundtrip() {
     }
 
     assert!(localtile_ok, "LocalTile round-trip failed");
-    assert!(fragment_ok, "Fragment round-trip failed - this is Stage 9 (suspected problem area)");
+    assert!(
+        fragment_ok,
+        "Fragment round-trip failed - this is Stage 9 (suspected problem area)"
+    );
 
     println!("\nTest PASSED: Softmax fragment round-trip preserves values");
 }
@@ -815,7 +906,12 @@ fn pv_matmul_kernel(
     cmma::fill(&out_fragment, 0.0f32);
 
     // Execute P×V: f16×f16→f32
-    cmma::execute::<half::f16, half::f16, f32, f32>(&p_fragment_f16, &v_fragment, &out_fragment, &out_fragment);
+    cmma::execute::<half::f16, half::f16, f32, f32>(
+        &p_fragment_f16,
+        &v_fragment,
+        &out_fragment,
+        &out_fragment,
+    );
 
     // Store output
     let smem_out_size = seq_q * val_dim;
@@ -844,8 +940,10 @@ fn test_pv_matmul() {
 
     // Check for f16 CMMA support
     let cmma_configs = &client.properties().features.cmma;
-    let f16_type = cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Float(cubecl::ir::FloatKind::F16));
-    let f32_type = cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Float(cubecl::ir::FloatKind::F32));
+    let f16_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Float(cubecl::ir::FloatKind::F16));
+    let f32_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Float(cubecl::ir::FloatKind::F32));
 
     let mut found_config: Option<(u32, u32, u32)> = None;
     for (m, n, k) in [(8, 16, 16), (8, 8, 8), (16, 16, 16)] {
@@ -876,12 +974,13 @@ fn test_pv_matmul() {
         }
     };
 
-    println!("Testing P×V matmul with seq_q={}, seq_kv={}, val_dim={}", seq_q, seq_kv, val_dim);
+    println!(
+        "Testing P×V matmul with seq_q={}, seq_kv={}, val_dim={}",
+        seq_q, seq_kv, val_dim
+    );
 
     // Create P (softmax probabilities): uniform 1/seq_kv
-    let p_f32: Vec<f32> = (0..(seq_q * seq_kv))
-        .map(|_| 1.0 / seq_kv as f32)
-        .collect();
+    let p_f32: Vec<f32> = (0..(seq_q * seq_kv)).map(|_| 1.0 / seq_kv as f32).collect();
     println!("P (uniform softmax): {:?}", &p_f32[0..seq_kv as usize]);
 
     // Create V: sequential values for easy verification
@@ -904,7 +1003,10 @@ fn test_pv_matmul() {
             expected[(i * val_dim + j) as usize] = sum;
         }
     }
-    println!("Expected output (first row): {:?}", &expected[0..val_dim as usize]);
+    println!(
+        "Expected output (first row): {:?}",
+        &expected[0..val_dim as usize]
+    );
 
     // Create GPU buffers
     let p_handle = client.create_from_slice(f32::as_bytes(&p_f32));
@@ -932,7 +1034,10 @@ fn test_pv_matmul() {
     let out_bytes = client.read_one(out_handle);
     let output: Vec<f32> = bytemuck::cast_slice(&out_bytes).to_vec();
 
-    println!("Actual output (first row): {:?}", &output[0..val_dim as usize]);
+    println!(
+        "Actual output (first row): {:?}",
+        &output[0..val_dim as usize]
+    );
 
     // Compare
     let mut max_error = 0.0f32;
@@ -946,7 +1051,10 @@ fn test_pv_matmul() {
         if err > 0.01 {
             let row = i / val_dim as usize;
             let col = i % val_dim as usize;
-            println!("MISMATCH at [{},{}]: expected={}, actual={}, error={}", row, col, exp, act, err);
+            println!(
+                "MISMATCH at [{},{}]: expected={}, actual={}, error={}",
+                row, col, exp, act, err
+            );
             all_ok = false;
         }
     }
@@ -973,13 +1081,17 @@ fn test_quantize_k_transpose() {
 
     println!("K matrix [seq_kv={}, head_dim={}]:", seq_kv, head_dim);
     for row in 0..seq_kv {
-        let row_data: Vec<f32> = (0..head_dim).map(|col| k_data[row * head_dim + col]).collect();
+        let row_data: Vec<f32> = (0..head_dim)
+            .map(|col| k_data[row * head_dim + col])
+            .collect();
         println!("  row {}: {:?}", row, row_data);
     }
 
     println!("\nExpected K^T [head_dim={}, seq_kv={}]:", head_dim, seq_kv);
     for row in 0..head_dim {
-        let row_data: Vec<f32> = (0..seq_kv).map(|col| k_data[col * head_dim + row]).collect();
+        let row_data: Vec<f32> = (0..seq_kv)
+            .map(|col| k_data[col * head_dim + row])
+            .collect();
         println!("  row {}: {:?}", row, row_data);
     }
 
@@ -1009,14 +1121,588 @@ fn test_quantize_k_transpose() {
 
     println!("\nMemory layout test:");
     println!("K stored row-major: {:?}", k_data);
-    println!("CMMA load with stride={} and ColMajor should give K^T", head_dim);
+    println!(
+        "CMMA load with stride={} and ColMajor should give K^T",
+        head_dim
+    );
 
     // Verify: K[seq_kv_idx, head_dim_idx] should become K^T[head_dim_idx, seq_kv_idx]
     for hd in 0..head_dim {
         for skv in 0..seq_kv {
             let k_val = k_data[skv * head_dim + hd];
             let kt_expected = k_val; // K^T[hd, skv] = K[skv, hd]
-            println!("  K[{},{}] = {} -> K^T[{},{}] = {}", skv, hd, k_val, hd, skv, kt_expected);
+            println!(
+                "  K[{},{}] = {} -> K^T[{},{}] = {}",
+                skv, hd, k_val, hd, skv, kt_expected
+            );
         }
     }
+}
+
+/// Test the full INT8 CMMA attention pipeline:
+/// 1. Q·K^T using i8×i8→i32 CMMA with quantization scales
+/// 2. Softmax (using exp2)
+/// 3. P×V using f16×f16→f32 CMMA
+///
+/// This test simulates what the real kernel does but with full visibility
+/// into intermediate values at each stage.
+#[cube(launch)]
+fn int8_attention_debug_kernel(
+    // Q: [seq_q, head_dim] i8
+    q_i8: &Array<i8>,
+    // K: [seq_kv, head_dim] i8 (will be transposed via CMMA load)
+    k_i8: &Array<i8>,
+    // V: [seq_kv, val_dim] f16
+    v_f16: &Array<half::f16>,
+    // Scales
+    q_scale: &Array<f32>,
+    k_scale: &Array<f32>,
+    // Debug outputs
+    debug_i32_scores: &mut Array<i32>, // Stage 3: raw i32 CMMA output
+    debug_f32_scores: &mut Array<f32>, // Stage 4: after scale application
+    debug_softmax: &mut Array<f32>,    // Stage 5: after softmax
+    debug_output: &mut Array<f32>,     // Final output
+    #[comptime] seq_q: u32,
+    #[comptime] seq_kv: u32,
+    #[comptime] head_dim: u32,
+    #[comptime] val_dim: u32,
+) {
+    // ===== Stage 3: Q·K^T using i8×i8→i32 CMMA =====
+
+    // Load Q as A matrix (RowMajor)
+    let q_fragment = unsafe {
+        cmma::Matrix::<i8>::uninitialized(
+            cmma::MatrixIdent::A,
+            seq_q as usize,
+            seq_kv as usize,
+            head_dim as usize,
+            cmma::MatrixLayout::RowMajor,
+        )
+    };
+    cmma::load(&q_fragment, &q_i8.to_slice(), head_dim);
+
+    // Load K as B matrix (ColMajor for transpose)
+    let k_fragment = unsafe {
+        cmma::Matrix::<i8>::uninitialized(
+            cmma::MatrixIdent::B,
+            seq_q as usize,
+            seq_kv as usize,
+            head_dim as usize,
+            cmma::MatrixLayout::ColMajor,
+        )
+    };
+    cmma::load(&k_fragment, &k_i8.to_slice(), head_dim);
+
+    // i32 accumulator
+    let acc_i32 = unsafe {
+        cmma::Matrix::<i32>::uninitialized(
+            cmma::MatrixIdent::Accumulator,
+            seq_q as usize,
+            seq_kv as usize,
+            head_dim as usize,
+            cmma::MatrixLayout::RowMajor,
+        )
+    };
+    cmma::fill(&acc_i32, 0i32);
+
+    // Execute i8×i8→i32 CMMA
+    cmma::execute::<i8, i8, i32, i32>(&q_fragment, &k_fragment, &acc_i32, &acc_i32);
+
+    // Store raw i32 scores to debug output
+    let smem_size = comptime!(seq_q * seq_kv);
+    let mut smem_i32 = SharedMemory::<i32>::new(smem_size as usize);
+    cmma::store(
+        &mut smem_i32.slice_mut(0, smem_size as usize),
+        &acc_i32,
+        seq_kv,
+        cmma::MatrixLayout::RowMajor,
+    );
+    sync_cube();
+
+    // Copy to debug_i32_scores
+    let elements_per_thread = comptime!((smem_size + 31) / 32);
+    for i in 0..elements_per_thread {
+        let idx = UNIT_POS_X + i * 32;
+        if idx < smem_size {
+            debug_i32_scores[idx as usize] = smem_i32[idx as usize];
+        }
+    }
+    sync_cube();
+
+    // ===== Stage 4: Apply combined scale (q_scale * k_scale) =====
+
+    let combined_scale = q_scale[0] * k_scale[0];
+    let mut smem_f32 = SharedMemory::<f32>::new(smem_size as usize);
+
+    for i in 0..elements_per_thread {
+        let idx = UNIT_POS_X + i * 32;
+        if idx < smem_size {
+            let i32_val = smem_i32[idx as usize];
+            smem_f32[idx as usize] = f32::cast_from(i32_val) * combined_scale;
+        }
+    }
+    sync_cube();
+
+    // Copy to debug_f32_scores
+    for i in 0..elements_per_thread {
+        let idx = UNIT_POS_X + i * 32;
+        if idx < smem_size {
+            debug_f32_scores[idx as usize] = smem_f32[idx as usize];
+        }
+    }
+    sync_cube();
+
+    // ===== Stage 5: Softmax (using exp2) =====
+    // Simple row-wise softmax: exp2(score - max) / sum
+    // Use thread 0 to do serial softmax for simplicity in debug kernel
+
+    let mut row_max = SharedMemory::<f32>::new(seq_q as usize);
+    let mut row_sum = SharedMemory::<f32>::new(seq_q as usize);
+
+    // Thread 0 computes softmax serially (simple but slow - fine for debug)
+    if UNIT_POS_X == 0 {
+        // Find row max values
+        for row in 0..seq_q {
+            let row_start = row * seq_kv;
+            let first_val = smem_f32[row_start as usize];
+            let mut max_val = first_val;
+            for col in 1..seq_kv {
+                let val = smem_f32[(row_start + col) as usize];
+                max_val = f32::max(max_val, val);
+            }
+            row_max[row as usize] = max_val;
+        }
+
+        // Compute exp2 and row sums
+        for row in 0..seq_q {
+            let row_start = row * seq_kv;
+            let max_val = row_max[row as usize];
+            let mut sum = 0.0f32;
+            for col in 0..seq_kv {
+                let idx = (row_start + col) as usize;
+                let exp_val = (smem_f32[idx] - max_val).exp2();
+                smem_f32[idx] = exp_val;
+                sum += exp_val;
+            }
+            row_sum[row as usize] = sum;
+        }
+
+        // Normalize
+        for row in 0..seq_q {
+            let row_start = row * seq_kv;
+            let sum = row_sum[row as usize];
+            let inv_sum = 1.0f32 / sum;
+            for col in 0..seq_kv {
+                let idx = (row_start + col) as usize;
+                smem_f32[idx] = smem_f32[idx] * inv_sum;
+            }
+        }
+    }
+    sync_cube();
+
+    // Copy to debug_softmax
+    for i in 0..elements_per_thread {
+        let idx = UNIT_POS_X + i * 32;
+        if idx < smem_size {
+            debug_softmax[idx as usize] = smem_f32[idx as usize];
+        }
+    }
+    sync_cube();
+
+    // ===== Stage: P×V using f16×f16→f32 CMMA =====
+
+    // Load softmax probabilities into f32 accumulator, then cast to f16
+    let p_fragment_f32 = unsafe {
+        cmma::Matrix::<f32>::uninitialized(
+            cmma::MatrixIdent::Accumulator,
+            seq_q as usize,
+            val_dim as usize,
+            seq_kv as usize,
+            cmma::MatrixLayout::RowMajor,
+        )
+    };
+    cmma::load_with_layout(
+        &p_fragment_f32,
+        &smem_f32.to_slice(),
+        seq_kv,
+        cmma::MatrixLayout::RowMajor,
+    );
+
+    let p_fragment_f16 = cmma::cast::<f32, half::f16>(&p_fragment_f32);
+
+    // Load V
+    let v_fragment = unsafe {
+        cmma::Matrix::<half::f16>::uninitialized(
+            cmma::MatrixIdent::B,
+            seq_q as usize,
+            val_dim as usize,
+            seq_kv as usize,
+            cmma::MatrixLayout::RowMajor,
+        )
+    };
+    cmma::load(&v_fragment, &v_f16.to_slice(), val_dim);
+
+    // Output accumulator
+    let out_fragment = unsafe {
+        cmma::Matrix::<f32>::uninitialized(
+            cmma::MatrixIdent::Accumulator,
+            seq_q as usize,
+            val_dim as usize,
+            seq_kv as usize,
+            cmma::MatrixLayout::RowMajor,
+        )
+    };
+    cmma::fill(&out_fragment, 0.0f32);
+
+    // Execute P×V
+    cmma::execute::<half::f16, half::f16, f32, f32>(
+        &p_fragment_f16,
+        &v_fragment,
+        &out_fragment,
+        &out_fragment,
+    );
+
+    // Store output
+    let out_size = comptime!(seq_q * val_dim);
+    let mut smem_out = SharedMemory::<f32>::new(out_size as usize);
+    cmma::store(
+        &mut smem_out.slice_mut(0, out_size as usize),
+        &out_fragment,
+        val_dim,
+        cmma::MatrixLayout::RowMajor,
+    );
+    sync_cube();
+
+    // Copy to debug_output
+    let out_elements_per_thread = comptime!((out_size + 31) / 32);
+    for i in 0..out_elements_per_thread {
+        let idx = UNIT_POS_X + i * 32;
+        if idx < out_size {
+            debug_output[idx as usize] = smem_out[idx as usize];
+        }
+    }
+}
+
+/// Test INT8 CMMA attention with debug output at each stage.
+#[test]
+fn test_int8_cmma_attention_stages() {
+    let client = <TestRuntime as Runtime>::client(&Default::default());
+
+    // Check for required CMMA configs
+    let cmma_configs = &client.properties().features.cmma;
+    let i8_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Int(cubecl::ir::IntKind::I8));
+    let i32_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Int(cubecl::ir::IntKind::I32));
+    let f16_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Float(cubecl::ir::FloatKind::F16));
+    let f32_type =
+        cubecl::ir::StorageType::Scalar(cubecl::ir::ElemType::Float(cubecl::ir::FloatKind::F32));
+
+    // Find i8×i8→i32 config
+    let mut i8_config: Option<(u32, u32, u32)> = None;
+    for (m, n, k) in [(8, 16, 32), (16, 16, 32), (16, 8, 32)] {
+        let config = cubecl::features::MmaConfig {
+            a_type: i8_type,
+            b_type: i8_type,
+            cd_type: i32_type,
+            m,
+            n,
+            k,
+        };
+        if cmma_configs.contains(&config) {
+            i8_config = Some((m, n, k));
+            break;
+        }
+    }
+
+    // Find f16×f16→f32 config
+    let mut f16_config: Option<(u32, u32, u32)> = None;
+    for (m, n, k) in [(8, 16, 16), (8, 8, 8), (16, 16, 16)] {
+        let config = cubecl::features::MmaConfig {
+            a_type: f16_type,
+            b_type: f16_type,
+            cd_type: f32_type,
+            m,
+            n,
+            k,
+        };
+        if cmma_configs.contains(&config) {
+            f16_config = Some((m, n, k));
+            break;
+        }
+    }
+
+    let (seq_q, seq_kv, head_dim) = match i8_config {
+        Some((m, n, k)) => {
+            println!("Found i8×i8→i32 CMMA config: M={}, N={}, K={}", m, n, k);
+            (m, n, k)
+        }
+        None => {
+            println!("Skipping test: no i8×i8→i32 CMMA config available");
+            return;
+        }
+    };
+
+    let val_dim = match f16_config {
+        Some((_, n, _)) => {
+            println!("Found f16×f16→f32 CMMA config, using val_dim={}", n);
+            n
+        }
+        None => {
+            println!("Skipping test: no f16×f16→f32 CMMA config available");
+            return;
+        }
+    };
+
+    println!(
+        "\nTest dimensions: seq_q={}, seq_kv={}, head_dim={}, val_dim={}",
+        seq_q, seq_kv, head_dim, val_dim
+    );
+
+    // Create test data
+    // Q: each row has the same value pattern for easy verification
+    let q_f32: Vec<f32> = (0..(seq_q * head_dim) as usize)
+        .map(|i| {
+            let row = i / head_dim as usize;
+            let col = i % head_dim as usize;
+            ((row + 1) as f32 * 0.1) + (col as f32 * 0.001)
+        })
+        .collect();
+
+    // K: similar pattern
+    let k_f32: Vec<f32> = (0..(seq_kv * head_dim) as usize)
+        .map(|i| {
+            let row = i / head_dim as usize;
+            let col = i % head_dim as usize;
+            ((row + 1) as f32 * 0.05) + (col as f32 * 0.001)
+        })
+        .collect();
+
+    // V: simple increasing pattern
+    let v_f32: Vec<f32> = (0..(seq_kv * val_dim) as usize)
+        .map(|i| (i as f32 + 1.0) * 0.1)
+        .collect();
+    let v_f16: Vec<half::f16> = v_f32.iter().map(|&x| half::f16::from_f32(x)).collect();
+
+    // Quantize Q with sm_scale = 1/sqrt(head_dim) * log2(e)
+    let sm_scale = (1.0 / (head_dim as f32).sqrt()) * std::f32::consts::LOG2_E;
+    println!("sm_scale = 1/sqrt({}) * log2(e) = {}", head_dim, sm_scale);
+
+    // Quantize Q (with sm_scale baked in)
+    let q_scaled: Vec<f32> = q_f32.iter().map(|&x| x * sm_scale).collect();
+    let q_max_abs = q_scaled.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+    let q_scale = q_max_abs / 127.0;
+    let q_inv_scale = 127.0 / q_max_abs.max(1e-6);
+    let q_i8: Vec<i8> = q_scaled
+        .iter()
+        .map(|&x| (x * q_inv_scale).round().clamp(-127.0, 127.0) as i8)
+        .collect();
+
+    // Quantize K (without sm_scale)
+    let k_max_abs = k_f32.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+    let k_scale = k_max_abs / 127.0;
+    let k_inv_scale = 127.0 / k_max_abs.max(1e-6);
+    let k_i8: Vec<i8> = k_f32
+        .iter()
+        .map(|&x| (x * k_inv_scale).round().clamp(-127.0, 127.0) as i8)
+        .collect();
+
+    println!("\nQuantization:");
+    println!(
+        "  Q: max_abs={:.6} (after sm_scale), scale={:.6}",
+        q_max_abs, q_scale
+    );
+    println!("  K: max_abs={:.6}, scale={:.6}", k_max_abs, k_scale);
+    println!("  Combined scale: {:.6}", q_scale * k_scale);
+
+    // Create GPU buffers
+    let q_i8_handle = client.create_from_slice(bytemuck::cast_slice(&q_i8));
+    let k_i8_handle = client.create_from_slice(bytemuck::cast_slice(&k_i8));
+    let v_f16_handle = client.create_from_slice(bytemuck::cast_slice(&v_f16));
+    let q_scale_handle = client.create_from_slice(f32::as_bytes(&[q_scale]));
+    let k_scale_handle = client.create_from_slice(f32::as_bytes(&[k_scale]));
+
+    let score_size = (seq_q * seq_kv) as usize;
+    let output_size = (seq_q * val_dim) as usize;
+
+    let debug_i32_handle = client.empty(score_size * core::mem::size_of::<i32>());
+    let debug_f32_handle = client.empty(score_size * core::mem::size_of::<f32>());
+    let debug_softmax_handle = client.empty(score_size * core::mem::size_of::<f32>());
+    let debug_output_handle = client.empty(output_size * core::mem::size_of::<f32>());
+
+    // Launch kernel
+    unsafe {
+        int8_attention_debug_kernel::launch(
+            &client,
+            CubeCount::Static(1, 1, 1),
+            CubeDim::new_1d(32),
+            ArrayArg::from_raw_parts::<i8>(&q_i8_handle, (seq_q * head_dim) as usize, 1),
+            ArrayArg::from_raw_parts::<i8>(&k_i8_handle, (seq_kv * head_dim) as usize, 1),
+            ArrayArg::from_raw_parts::<half::f16>(&v_f16_handle, (seq_kv * val_dim) as usize, 1),
+            ArrayArg::from_raw_parts::<f32>(&q_scale_handle, 1, 1),
+            ArrayArg::from_raw_parts::<f32>(&k_scale_handle, 1, 1),
+            ArrayArg::from_raw_parts::<i32>(&debug_i32_handle, score_size, 1),
+            ArrayArg::from_raw_parts::<f32>(&debug_f32_handle, score_size, 1),
+            ArrayArg::from_raw_parts::<f32>(&debug_softmax_handle, score_size, 1),
+            ArrayArg::from_raw_parts::<f32>(&debug_output_handle, output_size, 1),
+            seq_q,
+            seq_kv,
+            head_dim,
+            val_dim,
+        )
+        .unwrap();
+    }
+
+    // Read back results
+    let i32_scores: Vec<i32> = bytemuck::cast_slice(&client.read_one(debug_i32_handle)).to_vec();
+    let f32_scores: Vec<f32> = bytemuck::cast_slice(&client.read_one(debug_f32_handle)).to_vec();
+    let softmax: Vec<f32> = bytemuck::cast_slice(&client.read_one(debug_softmax_handle)).to_vec();
+    let output: Vec<f32> = bytemuck::cast_slice(&client.read_one(debug_output_handle)).to_vec();
+
+    // ===== Validate Stage 3: i32 CMMA scores =====
+    println!("\n===== Stage 3: i32 CMMA scores =====");
+    println!(
+        "i32 scores (first row): {:?}",
+        &i32_scores[0..seq_kv as usize]
+    );
+
+    // Compute expected i32 scores on CPU: Q @ K^T
+    let mut expected_i32 = vec![0i32; score_size];
+    for i in 0..seq_q as usize {
+        for j in 0..seq_kv as usize {
+            let mut sum = 0i32;
+            for d in 0..head_dim as usize {
+                sum +=
+                    q_i8[i * head_dim as usize + d] as i32 * k_i8[j * head_dim as usize + d] as i32;
+            }
+            expected_i32[i * seq_kv as usize + j] = sum;
+        }
+    }
+    println!(
+        "Expected i32 (first row): {:?}",
+        &expected_i32[0..seq_kv as usize]
+    );
+
+    let mut i32_max_error = 0i32;
+    for i in 0..score_size {
+        let err = (i32_scores[i] - expected_i32[i]).abs();
+        i32_max_error = i32_max_error.max(err);
+    }
+    println!("Max i32 error: {}", i32_max_error);
+
+    // ===== Validate Stage 4: f32 scores after scale =====
+    println!("\n===== Stage 4: f32 scores after scale =====");
+    println!(
+        "f32 scores (first row): {:?}",
+        &f32_scores[0..seq_kv as usize]
+    );
+
+    let combined_scale = q_scale * k_scale;
+    let expected_f32: Vec<f32> = expected_i32
+        .iter()
+        .map(|&x| x as f32 * combined_scale)
+        .collect();
+    println!(
+        "Expected f32 (first row): {:?}",
+        &expected_f32[0..seq_kv as usize]
+    );
+
+    let f32_max_error: f32 = f32_scores
+        .iter()
+        .zip(expected_f32.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("Max f32 error: {}", f32_max_error);
+
+    // Check if scores are in reasonable range (should be roughly -10 to +10 for attention)
+    let score_min = f32_scores.iter().cloned().fold(f32::INFINITY, f32::min);
+    let score_max = f32_scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    println!("Score range: [{}, {}]", score_min, score_max);
+
+    // ===== Validate Stage 5: Softmax =====
+    println!("\n===== Stage 5: Softmax =====");
+    println!("Softmax (first row): {:?}", &softmax[0..seq_kv as usize]);
+
+    // Check row sums
+    println!("Row sums:");
+    for row in 0..seq_q as usize {
+        let row_start = row * seq_kv as usize;
+        let row_end = row_start + seq_kv as usize;
+        let row_sum: f32 = softmax[row_start..row_end].iter().sum();
+        println!("  Row {}: sum = {:.6}", row, row_sum);
+        // Row sum should be ~1.0
+        assert!(
+            (row_sum - 1.0).abs() < 0.01,
+            "Softmax row {} sum {} not close to 1.0",
+            row,
+            row_sum
+        );
+    }
+
+    // ===== Validate output =====
+    println!("\n===== Final Output =====");
+    println!("Output (first row): {:?}", &output[0..val_dim as usize]);
+
+    // Compute expected output: softmax @ V (using CPU softmax on expected_f32)
+    // Compute CPU softmax
+    let mut cpu_softmax = expected_f32.clone();
+    for row in 0..seq_q as usize {
+        let row_start = row * seq_kv as usize;
+        let row_end = row_start + seq_kv as usize;
+
+        // Max
+        let max_val = cpu_softmax[row_start..row_end]
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max);
+        // Exp2
+        for i in row_start..row_end {
+            cpu_softmax[i] = (cpu_softmax[i] - max_val).exp2();
+        }
+        // Sum and normalize
+        let sum: f32 = cpu_softmax[row_start..row_end].iter().sum();
+        for i in row_start..row_end {
+            cpu_softmax[i] /= sum;
+        }
+    }
+
+    // Compute expected output: softmax @ V
+    let mut expected_output = vec![0.0f32; output_size];
+    for i in 0..seq_q as usize {
+        for j in 0..val_dim as usize {
+            let mut sum = 0.0f32;
+            for k in 0..seq_kv as usize {
+                sum += cpu_softmax[i * seq_kv as usize + k] * v_f32[k * val_dim as usize + j];
+            }
+            expected_output[i * val_dim as usize + j] = sum;
+        }
+    }
+    println!(
+        "Expected output (first row): {:?}",
+        &expected_output[0..val_dim as usize]
+    );
+
+    let output_max_error: f32 = output
+        .iter()
+        .zip(expected_output.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    println!("Max output error: {}", output_max_error);
+
+    // Assertions
+    assert!(
+        i32_max_error == 0,
+        "i32 CMMA scores don't match CPU reference"
+    );
+    assert!(
+        f32_max_error < 0.001,
+        "f32 scores after scale don't match CPU reference"
+    );
+    assert!(
+        output_max_error < 0.1,
+        "Final output doesn't match CPU reference (tolerance 0.1 for f16 precision)"
+    );
+
+    println!("\n===== TEST PASSED =====");
 }

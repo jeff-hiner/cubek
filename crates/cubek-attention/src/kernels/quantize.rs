@@ -8,9 +8,12 @@
 //! - Per-row: Scale layout `[batch, heads, seq]` - one scale per row
 //! - Per-head: Scale layout `[batch, heads]` - one scale per entire head (recommended)
 
-use cubecl::ir::{ElemType, FloatKind, StorageType};
-use cubecl::prelude::*;
-use cubecl::{CubeCount, CubeDim, Runtime, client::ComputeClient};
+use cubecl::{
+    CubeCount, CubeDim, Runtime,
+    client::ComputeClient,
+    ir::{ElemType, FloatKind, StorageType},
+    prelude::*,
+};
 
 /// Minimum scale value to avoid division by zero during quantization.
 const MIN_QUANT_SCALE: f32 = 1e-6;
@@ -47,7 +50,10 @@ pub fn quantize_per_row<EI: Numeric>(
         let row_offset = row_idx * elements_per_row / line_size as usize;
 
         // Phase 1: Find max absolute value in this row
-        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
+        #[expect(
+            clippy::manual_div_ceil,
+            reason = "CubeCL macro doesn't support div_ceil"
+        )]
         let elements_per_unit = (lines_per_row + CUBE_DIM_X - 1) / CUBE_DIM_X;
         let mut local_max = 0.0f32;
 
@@ -123,7 +129,10 @@ pub fn quantize_per_head_find_max<EI: Numeric>(
         let head_offset = head_idx as usize * lines_per_head as usize;
 
         // Each thread processes multiple lines
-        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
+        #[expect(
+            clippy::manual_div_ceil,
+            reason = "CubeCL macro doesn't support div_ceil"
+        )]
         let lines_per_thread = (lines_per_head + CUBE_DIM_X - 1) / CUBE_DIM_X;
         let mut local_max = 0.0f32;
 
@@ -189,7 +198,10 @@ pub fn quantize_per_head_apply<EI: Numeric>(
         let head_offset = head_idx as usize * lines_per_head as usize;
 
         // Each thread processes multiple lines
-        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
+        #[expect(
+            clippy::manual_div_ceil,
+            reason = "CubeCL macro doesn't support div_ceil"
+        )]
         let lines_per_thread = (lines_per_head + CUBE_DIM_X - 1) / CUBE_DIM_X;
 
         for i in 0..lines_per_thread {
@@ -327,17 +339,20 @@ pub fn launch_quantize_per_row<R: Runtime, EI: Numeric>(
 /// Per-block INT8 quantization kernel - Phase 1: Find max absolute value per block.
 ///
 /// Each workgroup processes one block (block_size rows) and computes the max abs
-/// across all elements in that block.
+/// across all elements in that block. Following SageAttention, the input is multiplied
+/// by `sm_scale` before finding max, so the quantization range is based on the scaled values.
 ///
 /// # Arguments
 /// * `input` - Input tensor in f16/f32, shape `[batch, heads, seq, dim]`
 /// * `max_vals` - Output max absolute values per block, shape `[batch * heads * num_blocks]`
+/// * `sm_scale` - Softmax scale to apply (1/sqrt(head_dim) for Q, 1.0 for K)
 /// * `dim` - Head dimension
 /// * `block_size` - Number of seq positions per block
 #[cube(launch, launch_unchecked)]
 pub fn quantize_per_block_find_max<EI: Numeric>(
     input: &Tensor<Line<EI>>,
     max_vals: &mut Tensor<f32>,
+    sm_scale: f32,
     #[comptime] dim: u32,
     #[comptime] block_size: u32,
     #[comptime] line_size: u32,
@@ -355,7 +370,10 @@ pub fn quantize_per_block_find_max<EI: Numeric>(
         let block_offset = block_idx as usize * lines_per_block as usize;
 
         // Each thread processes multiple lines
-        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
+        #[expect(
+            clippy::manual_div_ceil,
+            reason = "CubeCL macro doesn't support div_ceil"
+        )]
         let lines_per_thread = (lines_per_block + CUBE_DIM_X - 1) / CUBE_DIM_X;
         let mut local_max = 0.0f32;
 
@@ -364,7 +382,8 @@ pub fn quantize_per_block_find_max<EI: Numeric>(
             if line_idx < lines_per_block {
                 let line = input[block_offset + line_idx as usize];
                 for j in 0..line_size {
-                    let val = f32::cast_from(line[j as usize]);
+                    // Apply sm_scale before finding max (SageAttention approach)
+                    let val = f32::cast_from(line[j as usize]) * sm_scale;
                     local_max = f32::max(local_max, f32::abs(val));
                 }
             }
@@ -383,12 +402,15 @@ pub fn quantize_per_block_find_max<EI: Numeric>(
 /// Per-block INT8 quantization kernel - Phase 2: Quantize using per-block scales.
 ///
 /// Uses the pre-computed max values to quantize the tensor with per-block scales.
+/// Following SageAttention, the input is multiplied by `sm_scale` before quantizing,
+/// so the quantized values represent the scaled input.
 ///
 /// # Arguments
 /// * `input` - Input tensor in f16/f32, shape `[batch, heads, seq, dim]`
 /// * `output` - Output tensor in i8, same shape as input
 /// * `max_vals` - Max absolute values per block, shape `[batch * heads * num_blocks]`
 /// * `scales` - Output scales per block, shape `[batch * heads * num_blocks]`
+/// * `sm_scale` - Softmax scale to apply (1/sqrt(head_dim) for Q, 1.0 for K)
 /// * `dim` - Head dimension
 /// * `block_size` - Number of seq positions per block
 #[cube(launch, launch_unchecked)]
@@ -397,6 +419,7 @@ pub fn quantize_per_block_apply<EI: Numeric>(
     output: &mut Tensor<Line<i8>>,
     max_vals: &Tensor<f32>,
     scales: &mut Tensor<f32>,
+    sm_scale: f32,
     #[comptime] dim: u32,
     #[comptime] block_size: u32,
     #[comptime] line_size: u32,
@@ -421,7 +444,10 @@ pub fn quantize_per_block_apply<EI: Numeric>(
         let block_offset = block_idx as usize * lines_per_block as usize;
 
         // Each thread processes multiple lines
-        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
+        #[expect(
+            clippy::manual_div_ceil,
+            reason = "CubeCL macro doesn't support div_ceil"
+        )]
         let lines_per_thread = (lines_per_block + CUBE_DIM_X - 1) / CUBE_DIM_X;
 
         for i in 0..lines_per_thread {
@@ -430,7 +456,8 @@ pub fn quantize_per_block_apply<EI: Numeric>(
                 let in_line = input[block_offset + line_idx as usize];
                 let mut out_line = Line::<i8>::empty(line_size as usize);
                 for j in 0..line_size {
-                    let val = f32::cast_from(in_line[j as usize]);
+                    // Apply sm_scale before quantizing (SageAttention approach)
+                    let val = f32::cast_from(in_line[j as usize]) * sm_scale;
                     let quantized = f32::round(val * inv_scale);
                     let clamped = f32::clamp(quantized, -127.0f32, 127.0f32);
                     out_line[j as usize] = i8::cast_from(clamped);
@@ -444,8 +471,11 @@ pub fn quantize_per_block_apply<EI: Numeric>(
 /// Launch the per-block quantization kernel.
 ///
 /// This uses two passes:
-/// 1. Find max absolute value per block
-/// 2. Quantize using the per-block scale
+/// 1. Find max absolute value per block (after applying sm_scale)
+/// 2. Quantize using the per-block scale (with sm_scale baked in)
+///
+/// Following SageAttention, the input is multiplied by `sm_scale` before quantization.
+/// For Q, this is typically 1/sqrt(head_dim). For K, this is 1.0.
 ///
 /// # Arguments
 /// * `client` - The compute client
@@ -453,12 +483,14 @@ pub fn quantize_per_block_apply<EI: Numeric>(
 /// * `output` - Output i8 tensor handle, same shape as input
 /// * `scales` - Output f32 scales tensor, shape `[batch * heads * num_blocks]`
 /// * `config` - Quantization configuration
+/// * `sm_scale` - Softmax scale (1/sqrt(head_dim) for Q, 1.0 for K)
 pub fn launch_quantize_per_block<R: Runtime, EI: Numeric>(
     client: &ComputeClient<R>,
     input: &TensorHandleRef<R>,
     output: &TensorHandleRef<R>,
     scales: &TensorHandleRef<R>,
     config: &QuantizeConfig,
+    sm_scale: f32,
 ) {
     // Total number of blocks = batch * heads * num_blocks
     let total_blocks: usize = scales.shape.iter().product();
@@ -475,7 +507,7 @@ pub fn launch_quantize_per_block<R: Runtime, EI: Numeric>(
     // Use 32 threads per workgroup (one warp)
     let cube_dim = CubeDim::new_1d(32);
 
-    // Phase 1: Find max per block
+    // Phase 1: Find max per block (with sm_scale applied)
     unsafe {
         let _ = quantize_per_block_find_max::launch_unchecked::<EI, R>(
             client,
@@ -483,13 +515,14 @@ pub fn launch_quantize_per_block<R: Runtime, EI: Numeric>(
             cube_dim,
             input.as_tensor_arg(config.line_size as usize),
             max_vals.as_ref().as_tensor_arg(1),
+            ScalarArg::new(sm_scale),
             config.dim,
             config.block_size,
             config.line_size,
         );
     }
 
-    // Phase 2: Quantize using per-block scales
+    // Phase 2: Quantize using per-block scales (with sm_scale baked in)
     unsafe {
         let _ = quantize_per_block_apply::launch_unchecked::<EI, R>(
             client,
@@ -499,6 +532,7 @@ pub fn launch_quantize_per_block<R: Runtime, EI: Numeric>(
             output.as_tensor_arg(config.line_size as usize),
             max_vals.as_ref().as_tensor_arg(1),
             scales.as_tensor_arg(1),
+            ScalarArg::new(sm_scale),
             config.dim,
             config.block_size,
             config.line_size,

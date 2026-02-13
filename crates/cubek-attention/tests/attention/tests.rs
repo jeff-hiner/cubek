@@ -54,7 +54,7 @@ fn one_tile_simple() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
 
     let strategy = strategy(blueprint);
@@ -109,7 +109,7 @@ fn one_partition_several_planes() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
 
     let strategy = strategy(blueprint);
@@ -164,7 +164,7 @@ fn problem_smaller_than_one_tile_seq_q_seq_kv_val_dim() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -214,7 +214,7 @@ fn head_dim_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -263,7 +263,7 @@ fn two_rows_in_array_tile() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -313,7 +313,7 @@ fn one_tile_seqq16() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -363,7 +363,7 @@ fn one_tile_seqq4() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -412,7 +412,7 @@ fn seqq2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -461,7 +461,7 @@ fn hd2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -510,7 +510,7 @@ fn kv2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -559,7 +559,7 @@ fn vd2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -608,7 +608,7 @@ fn hd2_vd2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -657,7 +657,7 @@ fn all2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -707,7 +707,7 @@ fn global_iterations_2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -757,7 +757,7 @@ fn global_iterations_2_kv2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -807,7 +807,7 @@ fn partition_kv1_global1_with_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -857,7 +857,7 @@ fn partition_seqq2_global2_kv2_global2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -906,7 +906,7 @@ fn partition_many_planes() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -956,7 +956,7 @@ fn partition_kv1_global3_with_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1006,7 +1006,7 @@ fn partition_oob_in_q() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1055,7 +1055,7 @@ fn partition_kv2_with_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1104,7 +1104,7 @@ fn partition_kv2_causal() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1153,7 +1153,7 @@ fn partition_kv2_masked() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1202,7 +1202,7 @@ fn stage2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1251,7 +1251,7 @@ fn stage4() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1302,7 +1302,7 @@ fn stage2_problem4() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1351,7 +1351,7 @@ fn reuse_key_value() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1400,7 +1400,7 @@ fn double_row_wise() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1449,7 +1449,7 @@ fn one_tile_masked() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1498,7 +1498,7 @@ fn one_tile_causal() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1547,7 +1547,7 @@ fn one_tile_masked_causal() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1597,7 +1597,7 @@ fn masked_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1647,7 +1647,7 @@ fn masked_larger() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1696,7 +1696,7 @@ fn num_heads_2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1745,7 +1745,7 @@ fn batch_2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1794,7 +1794,7 @@ fn batch_2_seqq2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1843,7 +1843,7 @@ fn num_heads_2_batch_2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1892,7 +1892,7 @@ fn num_heads_2_masked() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1947,7 +1947,7 @@ fn huge_problem() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
-        original_head_dim: problem.dims.head_dim as u32,
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)

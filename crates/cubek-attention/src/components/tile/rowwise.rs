@@ -1,7 +1,5 @@
-use cubecl;
-use cubecl::prelude::*;
-
 use crate::components::tile::FULLY_MASKED_ROW_THRESHOLD;
+use cubecl::{self, prelude::*};
 
 #[derive(CubeType)]
 /// Contains one value per row of a fragment for which the unit contributes
@@ -178,6 +176,25 @@ impl<E: Float> RowWise<E> {
         #[unroll]
         for i in 0..self.num_rows {
             let val = (self.index(i) - other.index(i)).exp();
+            vals.push(RowVal::<E> { val });
+        }
+
+        RowWise::<E> {
+            num_rows: self.num_rows,
+            vals,
+        }
+    }
+
+    /// Computes 2^(self.val - other.val) for every row, and outputs a new RowWise.
+    ///
+    /// This is used by INT8 CMMA attention where log2(e) is baked into Q quantization,
+    /// enabling the identity: exp(x) = exp2(x * log2(e)).
+    pub fn exp2_diff(&self, other: &RowWise<E>) -> RowWise<E> {
+        let mut vals = Sequence::new();
+
+        #[unroll]
+        for i in 0..self.num_rows {
+            let val = (self.index(i) - other.index(i)).exp2();
             vals.push(RowVal::<E> { val });
         }
 

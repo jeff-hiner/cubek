@@ -1,6 +1,7 @@
 pub(crate) mod launcher;
 
 mod int8_quant;
+mod int8_vs_f16_comparison;
 mod reference;
 mod utils;
 
@@ -9,7 +10,7 @@ pub(crate) use utils::tiling_scheme_ops;
 
 mod unit {
     use cubek_attention::{
-        definition::{AttentionBlueprint, AttentionTileSize},
+        definition::{AttentionBlueprint, AttentionProblem, AttentionTileSize},
         launch::{BlueprintStrategy, Strategy},
     };
     fn strategy(blueprint: AttentionBlueprint) -> Strategy {
@@ -27,6 +28,12 @@ mod unit {
 
     fn minimal_seq_q_stage() -> u32 {
         32
+    }
+
+    /// For non-INT8 routines, use the actual head_dim for softmax scaling.
+    #[allow(dead_code)]
+    fn original_head_dim_for_blueprint(problem: &AttentionProblem) -> u32 {
+        problem.dims.head_dim as u32
     }
 
     mod f16_ty {
@@ -56,7 +63,7 @@ mod unit {
 
 mod blackbox_accelerated {
     use cubek_attention::{
-        definition::{AttentionBlueprint, AttentionTileSize},
+        definition::{AttentionBlueprint, AttentionProblem, AttentionTileSize},
         launch::{BlueprintStrategy, Strategy},
     };
 
@@ -92,6 +99,12 @@ mod blackbox_accelerated {
         1
     }
 
+    /// For non-INT8 routines, use the actual head_dim for softmax scaling.
+    #[allow(dead_code)]
+    fn original_head_dim_for_blueprint(problem: &AttentionProblem) -> u32 {
+        problem.dims.head_dim as u32
+    }
+
     mod f16_ty {
         use super::*;
         use cubecl::frontend::CubePrimitive;
@@ -121,7 +134,7 @@ mod blackbox_accelerated {
 /// Uses i8×i8→i32 CMMA for Q·K^T, f16×f16→f32 for P×V.
 mod int8_cmma {
     use cubek_attention::{
-        definition::{AttentionBlueprint, AttentionTileSize},
+        definition::{AttentionBlueprint, AttentionProblem, AttentionTileSize},
         launch::{BlueprintStrategy, Strategy},
     };
 
@@ -142,6 +155,13 @@ mod int8_cmma {
     }
 
     fn minimal_seq_q_stage() -> u32 {
+        1
+    }
+
+    /// For INT8 CMMA, sm_scale (1/sqrt(head_dim) * log2(e)) is baked into Q quantization.
+    /// Set original_head_dim=1 so tile_softmax applies scale=1/sqrt(1)=1.0, avoiding double-scaling.
+    #[allow(dead_code)]
+    fn original_head_dim_for_blueprint(_problem: &AttentionProblem) -> u32 {
         1
     }
 
