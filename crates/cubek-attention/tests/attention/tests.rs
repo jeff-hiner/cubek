@@ -1906,13 +1906,14 @@ fn huge_problem() {
     let head_dim = 64;
     let val_dim = 64;
     let hd = head_dim as u32 / tile_size().head_dim;
+    let vd = val_dim as u32 / tile_size().val_dim;
     let tiling_scheme = AttentionTilingScheme {
         tile_size: tile_size(),
         partition_size: AttentionPartitionSize {
             seq_q: 1,
             seq_kv: 1,
             head_dim: hd,
-            val_dim: hd,
+            val_dim: vd,
         },
         stage_size: AttentionStageSize {
             seq_q: minimal_seq_q_stage(),

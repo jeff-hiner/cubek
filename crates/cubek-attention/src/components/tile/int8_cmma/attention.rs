@@ -2,25 +2,27 @@
 //!
 //! Uses i8×i8→i32 CMMA for Q·K^T (with per-tile quantization) and f16×f16→f32 CMMA for P×V.
 
+use crate::{
+    components::tile::{
+        FragmentAccumulator, FragmentAccumulatorExpand, FragmentSoftmax, FragmentSoftmaxExpand,
+        RowWise, TileAttention, TileAttentionConfig as _,
+        accelerated::local_tile::{LocalTile, LocalTileLayout},
+        int8_cmma::setup::Int8CmmaAttentionConfig,
+    },
+    definition::{
+        AttentionPrecision,
+        attention_types::{ACC, KS, MSK, SM},
+    },
+};
 use cubecl::{self, prelude::*};
 use cubek_matmul::components::tile::StridedTile;
 
-use crate::components::tile::accelerated::local_tile::{LocalTile, LocalTileLayout};
-use crate::components::tile::int8_cmma::setup::Int8CmmaAttentionConfig;
-use crate::components::tile::{
-    FragmentAccumulator, FragmentAccumulatorExpand, FragmentSoftmax, FragmentSoftmaxExpand,
-    RowWise, TileAttention, TileAttentionConfig as _,
-};
-use crate::definition::AttentionPrecision;
-use crate::definition::attention_types::{ACC, KS, MSK, SM};
-
 /// log2(e) constant for converting exp to exp2 in softmax
-#[expect(dead_code, reason = "will be used when proper quantization is implemented")]
+#[expect(
+    dead_code,
+    reason = "will be used when proper quantization is implemented"
+)]
 const LOG2_E: f32 = std::f32::consts::LOG2_E;
-
-/// Minimum scale value to avoid division by zero during quantization.
-/// Using 1e-6 as a small but non-zero value.
-const MIN_QUANT_SCALE: f32 = 1e-6;
 
 /// INT8 CMMA tile attention implementation.
 ///
@@ -212,7 +214,7 @@ impl<E: Float> FragmentSoftmax<E> for Int8CmmaSoftmax<E> {
         let seq_q = comptime!(self.seq_q);
         let stride = comptime!(self.stride);
         let num_elements = seq_q * stride;
-        let elements_per_thread = (num_elements + 31) / 32;
+        let elements_per_thread = num_elements.div_ceil(32);
         let scale = E::cast_from(self.combined_scale);
         for i in 0..elements_per_thread {
             let idx = UNIT_POS_X + i * 32;
@@ -394,16 +396,11 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
     ) {
         // Accumulate Q·K^T using i8×i8→i32 CMMA into the persistent accumulator.
         // This is called multiple times for head_dim partitions; results accumulate.
-        cmma::execute::<i8, i8, i32, i32>(
-            &lhs.fragment,
-            &rhs.fragment,
-            &out.acc_i32,
-            &out.acc_i32,
-        );
+        cmma::execute::<i8, i8, i32, i32>(&lhs.fragment, &rhs.fragment, &out.acc_i32, &out.acc_i32);
 
-        // Store the quantization scale (same for all partitions with fixed scale)
-        // Scale is applied once in rowwise_mut after all partitions complete
-        out.combined_scale = lhs.scale * rhs.scale;
+        // NOTE: combined_scale is set by set_combined_scale() BEFORE score_matmul is called.
+        // Do NOT overwrite it here - the scale comes from the ScaleReader which reads
+        // from the pre-computed scale tensors (q_scale * k_scale).
     }
 
     fn value_matmul(
@@ -509,7 +506,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
         let smem_slice_start = UNIT_POS_Y * smem_slot_size;
         let mut smem = SharedMemory::<i8>::new(num_planes as usize * smem_slot_size as usize);
 
-        let elements_per_thread = comptime!((smem_slot_size + 31) / 32);
+        let elements_per_thread = comptime!(smem_slot_size.div_ceil(32));
 
         // Read the tile's stride value - this is set by QueryReader::get_tile
         let tile_stride = tile.stride;
@@ -539,8 +536,10 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
         // We pass scales separately and apply them in rowwise_mut().
         fragment.scale = 1.0f32;
 
-        let smem_slice =
-            smem.slice(smem_slice_start as usize, (smem_slice_start + smem_slot_size) as usize);
+        let smem_slice = smem.slice(
+            smem_slice_start as usize,
+            (smem_slice_start + smem_slot_size) as usize,
+        );
         cmma::load(&fragment.fragment, &smem_slice, num_cols);
     }
 
@@ -565,7 +564,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
         let smem_slice_start = UNIT_POS_Y * smem_slot_size;
         let mut smem = SharedMemory::<i8>::new(num_planes as usize * smem_slot_size as usize);
 
-        let elements_per_thread = comptime!((src_size + 31) / 32);
+        let elements_per_thread = comptime!(src_size.div_ceil(32));
 
         // Pre-quantized: data is already i8, just copy to SMEM
         #[unroll]
@@ -587,8 +586,10 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
         // For now, use scale=1.0 here. The actual scale will be applied during dequantization.
         fragment.scale = 1.0f32;
 
-        let smem_slice =
-            smem.slice(smem_slice_start as usize, (smem_slice_start + smem_slot_size) as usize);
+        let smem_slice = smem.slice(
+            smem_slice_start as usize,
+            (smem_slice_start + smem_slot_size) as usize,
+        );
         cmma::load(&fragment.fragment, &smem_slice, k_dim);
     }
 

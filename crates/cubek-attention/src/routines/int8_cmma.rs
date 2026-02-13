@@ -120,13 +120,13 @@ fn blueprint<R: Runtime>(
             let i8_type = StorageType::Scalar(ElemType::Int(IntKind::I8));
             let i32_type = StorageType::Scalar(ElemType::Int(IntKind::I32));
 
-            let tile_size = find_int8_cmma_tile_size(client).ok_or_else(|| {
+            let tile_size = find_int8_cmma_tile_size(client).ok_or(
                 AttentionAvailabilityError::CmmaInstructionUnavailable {
                     a_type: i8_type,
                     b_type: i8_type,
                     cd_type: i32_type,
-                }
-            })?;
+                },
+            )?;
 
             eprintln!(
                 "[DEBUG Int8Cmma] tile_size: seq_q={}, seq_kv={}, head_dim={}, val_dim={}",

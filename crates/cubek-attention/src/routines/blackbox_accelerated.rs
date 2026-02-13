@@ -123,12 +123,10 @@ fn blueprint<R: Runtime>(
             };
 
             let tile_size = find_supported_tile_size(client, value_tile_type, accumulator_type)
-                .ok_or_else(|| {
-                    AttentionAvailabilityError::CmmaInstructionUnavailable {
-                        a_type: value_tile_type,
-                        b_type: value_tile_type,
-                        cd_type: accumulator_type,
-                    }
+                .ok_or(AttentionAvailabilityError::CmmaInstructionUnavailable {
+                    a_type: value_tile_type,
+                    b_type: value_tile_type,
+                    cd_type: accumulator_type,
                 })?;
 
             let partition_head_dim = problem.dims.head_dim as u32 / tile_size.head_dim;

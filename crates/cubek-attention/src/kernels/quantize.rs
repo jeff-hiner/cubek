@@ -47,6 +47,7 @@ pub fn quantize_per_row<EI: Numeric>(
         let row_offset = row_idx * elements_per_row / line_size as usize;
 
         // Phase 1: Find max absolute value in this row
+        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
         let elements_per_unit = (lines_per_row + CUBE_DIM_X - 1) / CUBE_DIM_X;
         let mut local_max = 0.0f32;
 
@@ -122,6 +123,7 @@ pub fn quantize_per_head_find_max<EI: Numeric>(
         let head_offset = head_idx as usize * lines_per_head as usize;
 
         // Each thread processes multiple lines
+        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
         let lines_per_thread = (lines_per_head + CUBE_DIM_X - 1) / CUBE_DIM_X;
         let mut local_max = 0.0f32;
 
@@ -187,6 +189,7 @@ pub fn quantize_per_head_apply<EI: Numeric>(
         let head_offset = head_idx as usize * lines_per_head as usize;
 
         // Each thread processes multiple lines
+        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
         let lines_per_thread = (lines_per_head + CUBE_DIM_X - 1) / CUBE_DIM_X;
 
         for i in 0..lines_per_thread {
@@ -305,7 +308,7 @@ pub fn launch_quantize_per_row<R: Runtime, EI: Numeric>(
 
     // Use 32 threads per workgroup (one warp)
     let cube_dim = CubeDim::new_1d(32);
-    let cube_count = (total_rows as u32 + 31) / 32;
+    let cube_count = (total_rows as u32).div_ceil(32);
 
     unsafe {
         let _ = quantize_per_row::launch_unchecked::<EI, R>(
@@ -352,6 +355,7 @@ pub fn quantize_per_block_find_max<EI: Numeric>(
         let block_offset = block_idx as usize * lines_per_block as usize;
 
         // Each thread processes multiple lines
+        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
         let lines_per_thread = (lines_per_block + CUBE_DIM_X - 1) / CUBE_DIM_X;
         let mut local_max = 0.0f32;
 
@@ -417,6 +421,7 @@ pub fn quantize_per_block_apply<EI: Numeric>(
         let block_offset = block_idx as usize * lines_per_block as usize;
 
         // Each thread processes multiple lines
+        #[expect(clippy::manual_div_ceil, reason = "CubeCL macro doesn't support div_ceil")]
         let lines_per_thread = (lines_per_block + CUBE_DIM_X - 1) / CUBE_DIM_X;
 
         for i in 0..lines_per_thread {
