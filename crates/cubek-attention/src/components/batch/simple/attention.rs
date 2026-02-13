@@ -6,6 +6,7 @@ use std::marker::PhantomData;
 use crate::components::{
     batch::{BatchAttention, BatchAttentionConfig, simple::config::SimpleBatchConfig},
     global::{GlobalAttention, GlobalAttentionConfig as _},
+    global::simple::CombinedScaleReader,
     stage::StageAttentionConfig as _,
 };
 use crate::definition::attention_types::*;
@@ -28,6 +29,7 @@ impl<GA: GlobalAttention<AP>, AP: AttentionPrecision> BatchAttention<AP>
         mask: CubeOption<VirtualTensor<MSK<AP>>>,
         out: VirtualTensor<OG<AP>, ReadWrite>,
         _cube_count_args: CubeCountInput,
+        scale_reader: CombinedScaleReader,
         #[comptime] config: Self::Config,
     ) {
         let global_config = config.global_config();
@@ -45,6 +47,7 @@ impl<GA: GlobalAttention<AP>, AP: AttentionPrecision> BatchAttention<AP>
             GA::init_key_reader(batch_index, key, global_config),
             GA::init_value_reader(batch_index, value, global_config),
             GA::init_mask_reader(batch_index, stage_q_offset, mask, seq_kv, global_config),
+            scale_reader,
             GA::init_writer(batch_index, stage_q_offset, out, global_config),
             seq_q,
             seq_kv,

@@ -289,6 +289,10 @@ impl<E: Float> FragmentSoftmax<E> for SageTile<E> {
     fn zero(&mut self) {
         self.zero()
     }
+
+    fn set_combined_scale(&mut self, _scale: f32) {
+        // No-op for non-INT8 attention
+    }
 }
 
 #[cube]
@@ -900,7 +904,6 @@ mod tests {
         let options = AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: true,
         };
 
         let strategy = Strategy::BlackboxAccelerated(BlueprintStrategy::Inferred(()));
@@ -919,6 +922,7 @@ mod tests {
             out_handle.clone(),
             &global_types,
             options,
+            None, // original_head_dim
         )
         .expect("INT8 CMMA kernel launch failed");
 

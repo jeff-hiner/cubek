@@ -1,5 +1,6 @@
 pub(crate) mod launcher;
 
+mod int8_quant;
 mod reference;
 mod utils;
 
@@ -68,6 +69,7 @@ mod blackbox_accelerated {
         {
             use cubek_attention::definition::AttentionTileSize;
 
+            // Metal uses 8×8×8 CMMA
             AttentionTileSize {
                 seq_q: 8,
                 seq_kv: 8,
@@ -77,11 +79,12 @@ mod blackbox_accelerated {
         }
 
         #[cfg(not(target_os = "macos"))]
+        // Intel Arc/Vulkan uses 8×16×16 for f16×f16→f32 CMMA
         AttentionTileSize {
             seq_q: 8,
-            seq_kv: 8,
-            head_dim: 8,
-            val_dim: 8,
+            seq_kv: 16,
+            head_dim: 16,
+            val_dim: 16,
         }
     }
 
@@ -108,6 +111,47 @@ mod blackbox_accelerated {
 
         fn global_dtypes() -> AttentionGlobalTypes {
             AttentionGlobalTypes::from_single_dtype(f32::as_type_native_unchecked())
+        }
+
+        include!("tests.rs");
+    }
+}
+
+/// INT8 CMMA tests - validates quantized attention implementation.
+/// Uses i8×i8→i32 CMMA for Q·K^T, f16×f16→f32 for P×V.
+mod int8_cmma {
+    use cubek_attention::{
+        definition::{AttentionBlueprint, AttentionTileSize},
+        launch::{BlueprintStrategy, Strategy},
+    };
+
+    fn strategy(blueprint: AttentionBlueprint) -> Strategy {
+        Strategy::Int8Cmma(BlueprintStrategy::Forced(blueprint))
+    }
+
+    /// INT8 CMMA tile sizes for i8×i8→i32 CMMA.
+    /// Intel Arc/Vulkan supports (M=8, N=16, K=32) for i8×i8→i32 CMMA.
+    /// P×V uses f16×f16→f32 CMMA which also supports (8, 16, 16).
+    fn tile_size() -> AttentionTileSize {
+        AttentionTileSize {
+            seq_q: 8,     // M dimension (must be 8 for Intel Arc i8 CMMA)
+            seq_kv: 16,   // N dimension
+            head_dim: 32, // K dimension for Q·K^T
+            val_dim: 16,  // Same as seq_kv for P×V
+        }
+    }
+
+    fn minimal_seq_q_stage() -> u32 {
+        1
+    }
+
+    mod f16_ty {
+        use super::*;
+        use cubecl::frontend::CubePrimitive;
+        use cubek_attention::definition::AttentionGlobalTypes;
+
+        fn global_dtypes() -> AttentionGlobalTypes {
+            AttentionGlobalTypes::from_single_dtype(half::f16::as_type_native_unchecked())
         }
 
         include!("tests.rs");

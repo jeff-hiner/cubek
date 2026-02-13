@@ -107,14 +107,17 @@ impl<E: Float> Int8CmmaSoftmax<E> {
         #[comptime] seq_kv: u32,
         #[comptime] config: Int8CmmaAttentionConfig,
     ) -> Self {
-        // f32 fragment used as A matrix in value_matmul (P×V)
-        // P is [seq_q, seq_kv], so K=seq_kv for the P×V operation
+        // f32 fragment used for softmax probabilities and as A matrix in value_matmul (P×V)
+        // CRITICAL: Must use K=head_dim to match acc_i32's K dimension.
+        // When cmma::store writes acc_i32 to SMEM and cmma::load_with_layout reads into
+        // fragment, they must have the SAME K to ensure thread mappings match.
+        // For value_matmul, cmma::cast handles converting Accumulator to matrix A.
         let fragment = unsafe {
             cmma::Matrix::<E>::uninitialized(
                 cmma::MatrixIdent::Accumulator,
                 seq_q as usize,
                 seq_kv as usize,
-                seq_kv as usize, // K=seq_kv for value_matmul
+                config.shared.attention_tile_size.head_dim as usize, // K=head_dim to match acc_i32
                 cmma::MatrixLayout::RowMajor,
             )
         };
@@ -186,6 +189,10 @@ impl<E: Float> FragmentSoftmax<E> for Int8CmmaSoftmax<E> {
     type SoftmaxScore = cmma::Matrix<E>;
     type SoftmaxRowFormat = LocalTile<E>;
     type SoftmaxVal = cmma::Matrix<E>;
+
+    fn set_combined_scale(&mut self, scale: f32) {
+        self.combined_scale = scale;
+    }
 
     fn rowwise_mut(&mut self) -> &mut Self::SoftmaxRowFormat {
         // Store acc_i32 directly to i32 SMEM.
@@ -489,80 +496,48 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
     }
 
     fn load_query<E: Numeric>(tile: &StridedTile<E>, fragment: &mut Self::Query) {
+        // With pre-quantization, the input is already i8.
+        // We load it directly into SMEM then into the CMMA fragment.
+        // The scale is stored per-row in a separate scale tensor.
+        // For simplicity, we use scale=1.0 here and apply actual scales during dequantization.
         let num_rows = comptime!(fragment.layout.num_rows); // seq_q
         let num_cols = comptime!(fragment.layout.num_cols); // head_dim
         let num_planes = comptime!(fragment.num_planes);
+        let line_size = comptime!(tile.line_size);
 
         let smem_slot_size = num_rows * num_cols;
         let smem_slice_start = UNIT_POS_Y * smem_slot_size;
         let mut smem = SharedMemory::<i8>::new(num_planes as usize * smem_slot_size as usize);
 
-        // Get the tile slice - use get_line for strided access
         let elements_per_thread = comptime!((smem_slot_size + 31) / 32);
 
-        // === PHASE 1: Find max absolute value using plane_max ===
-        // Each thread computes local max over its assigned elements.
-        // Use a fixed iteration count with bounds masking to ensure uniform control flow.
-        let mut local_max_abs = 0.0f32;
+        // Read the tile's stride value - this is set by QueryReader::get_tile
+        let tile_stride = tile.stride;
+        let tile_start = tile.start;
 
-        #[unroll]
-        for i in 0..elements_per_thread {
-            let linear_idx = UNIT_POS_X + i * 32;
-            // Compute (row, col) position in the tile
-            let row = linear_idx / num_cols;
-            let col = linear_idx % num_cols;
-            // Use get_line for proper strided access (handles swizzle too)
-            // get_line takes (strided_coord, contiguous_coord). For row-major: strided=row.
-            let in_bounds = linear_idx < smem_slot_size;
-            let safe_row = select(in_bounds, row, 0u32);
-            let safe_col = select(in_bounds, col, 0u32);
-            let line = tile.get_line(safe_row, safe_col / tile.line_size);
-            let val = f32::cast_from(line[(col % tile.line_size) as usize]);
-            // Mask OOB values to 0 for max reduction
-            let masked_abs = select(in_bounds, f32::abs(val), 0.0f32);
-            local_max_abs = f32::max(local_max_abs, masked_abs);
-        }
-
-        // Reduce across plane using warp-level plane_max
-        let tile_max_abs = plane_max(local_max_abs);
-
-        // Compute scale: scale = max_abs / 127 (for dequantization)
-        let scale = f32::max(tile_max_abs / 127.0f32, MIN_QUANT_SCALE);
-        fragment.scale = scale;
-        let inv_scale = 127.0f32 / f32::max(tile_max_abs, MIN_QUANT_SCALE);
-
-        // DEBUG Stage 1: Print Q quantization info (first cube, first thread only)
-        if CUBE_POS == 0 && UNIT_POS_X == 0 && UNIT_POS_Y == 0 {
-            // Read a sample value for debugging
-            let sample_line = tile.get_line(0u32, 0u32);
-            let sample_val = f32::cast_from(sample_line[0]);
-            let sample_quant = f32::round(sample_val * inv_scale);
-            println!(
-                "[Stage1 Q] max_abs={}, scale={}, inv_scale={}, sample_val={}, sample_quant={}",
-                tile_max_abs,
-                scale,
-                inv_scale,
-                sample_val,
-                sample_quant
-            );
-        }
-
-        // === PHASE 2: Quantize using dynamic scale ===
+        // Pre-quantized: data is already i8, just copy to SMEM
+        // Since E should be i8 for pre-quantized path, we can cast directly
         #[unroll]
         for i in 0..elements_per_thread {
             let linear_idx = UNIT_POS_X + i * 32;
             if linear_idx < smem_slot_size {
                 let row = linear_idx / num_cols;
                 let col = linear_idx % num_cols;
-                // Use get_line for proper strided access
-                let line = tile.get_line(row, col / tile.line_size);
-                let val = f32::cast_from(line[(col % tile.line_size) as usize]);
-                let quantized = f32::round(val * inv_scale);
-                let clamped = f32::clamp(quantized, -127.0f32, 127.0f32);
-                smem[(smem_slice_start + linear_idx) as usize] = i8::cast_from(clamped);
+                let line_offset = tile_start + row * tile_stride + col / line_size;
+                let elem_in_line = col % line_size;
+                let line = tile.stage[line_offset as usize];
+                // For pre-quantized i8 data, E=i8, so cast_from is identity
+                let val = i8::cast_from(line[elem_in_line as usize]);
+                smem[(smem_slice_start + linear_idx) as usize] = val;
             }
         }
         sync_cube();
+
+        // Scale is stored in the scale tensor, accessible via Int8ScaleAccess.
+        // For now, use scale=1.0 here. The actual scale will be applied during dequantization.
+        // This works because: actual_score = i32_result * q_scale * k_scale
+        // We pass scales separately and apply them in rowwise_mut().
+        fragment.scale = 1.0f32;
 
         let smem_slice =
             smem.slice(smem_slice_start as usize, (smem_slice_start + smem_slot_size) as usize);
@@ -574,10 +549,13 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
         fragment: &mut Self::Key,
         #[comptime] _config: Self::Config,
     ) {
+        // With pre-quantization, the input is already i8.
+        // We load it directly into SMEM then into the CMMA fragment.
         // Fragment expects K^T: [head_dim, seq_kv] = [K, N]
         let k_dim = comptime!(fragment.layout.num_rows); // head_dim = 32
         let n_dim = comptime!(fragment.layout.num_cols); // seq_kv = 16
         let num_planes = comptime!(fragment.num_planes);
+        let line_size = comptime!(tile.line_size);
 
         // Source K tile is [seq_kv, head_dim] = [N, K] = [16, 32]
         let src_cols = k_dim; // head_dim (contiguous dimension)
@@ -589,49 +567,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
 
         let elements_per_thread = comptime!((src_size + 31) / 32);
 
-        // === PHASE 1: Find max absolute value using plane_max ===
-        let mut local_max_abs = 0.0f32;
-
-        #[unroll]
-        for i in 0..elements_per_thread {
-            let linear_idx = UNIT_POS_X + i * 32;
-            // Compute (row, col) in source K tile [seq_kv, head_dim]
-            let src_row = linear_idx / src_cols; // seq_kv dimension (strided)
-            let src_col = linear_idx % src_cols; // head_dim dimension (contiguous)
-            // Use get_line for proper strided access
-            let in_bounds = linear_idx < src_size;
-            let safe_row = select(in_bounds, src_row, 0u32);
-            let safe_col = select(in_bounds, src_col, 0u32);
-            let line = tile.get_line(safe_row, safe_col / tile.line_size);
-            let val = f32::cast_from(line[(safe_col % tile.line_size) as usize]);
-            // Mask OOB values to 0 for max reduction
-            let masked_abs = select(in_bounds, f32::abs(val), 0.0f32);
-            local_max_abs = f32::max(local_max_abs, masked_abs);
-        }
-
-        // Reduce across plane using warp-level plane_max
-        let tile_max_abs = plane_max(local_max_abs);
-
-        let scale = f32::max(tile_max_abs / 127.0f32, MIN_QUANT_SCALE);
-        fragment.scale = scale;
-        let inv_scale = 127.0f32 / f32::max(tile_max_abs, MIN_QUANT_SCALE);
-
-        // DEBUG Stage 2: Print K quantization info (first cube, first thread only)
-        if CUBE_POS == 0 && UNIT_POS_X == 0 && UNIT_POS_Y == 0 {
-            let sample_line = tile.get_line(0u32, 0u32);
-            let sample_val = f32::cast_from(sample_line[0]);
-            let sample_quant = f32::round(sample_val * inv_scale);
-            println!(
-                "[Stage2 K] max_abs={}, scale={}, inv_scale={}, sample_val={}, sample_quant={}",
-                tile_max_abs,
-                scale,
-                inv_scale,
-                sample_val,
-                sample_quant
-            );
-        }
-
-        // === PHASE 2: Quantize using dynamic scale ===
+        // Pre-quantized: data is already i8, just copy to SMEM
         #[unroll]
         for i in 0..elements_per_thread {
             let linear_idx = UNIT_POS_X + i * 32;
@@ -639,15 +575,17 @@ impl<AP: AttentionPrecision> TileAttention<AP> for Int8CmmaTileAttention {
                 let src_row = linear_idx / src_cols;
                 let src_col = linear_idx % src_cols;
                 // Use get_line for proper strided access
-                let line = tile.get_line(src_row, src_col / tile.line_size);
-                let val = f32::cast_from(line[(src_col % tile.line_size) as usize]);
-                let quantized = f32::round(val * inv_scale);
-                let clamped = f32::clamp(quantized, -127.0f32, 127.0f32);
-
-                smem[(smem_slice_start + linear_idx) as usize] = i8::cast_from(clamped);
+                let line = tile.get_line(src_row, src_col / line_size);
+                // For pre-quantized i8 data, E=i8, so cast_from is identity
+                let val = i8::cast_from(line[(src_col % line_size) as usize]);
+                smem[(smem_slice_start + linear_idx) as usize] = val;
             }
         }
         sync_cube();
+
+        // Scale is stored in the scale tensor, accessible via Int8ScaleAccess.
+        // For now, use scale=1.0 here. The actual scale will be applied during dequantization.
+        fragment.scale = 1.0f32;
 
         let smem_slice =
             smem.slice(smem_slice_start as usize, (smem_slice_start + smem_slot_size) as usize);

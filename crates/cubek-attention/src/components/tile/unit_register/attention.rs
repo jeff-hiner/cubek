@@ -192,6 +192,10 @@ impl<E: Float> FragmentSoftmax<E> for UnitTile<E> {
     fn zero(&mut self) {
         self.zero()
     }
+
+    fn set_combined_scale(&mut self, _scale: f32) {
+        // No-op for non-INT8 attention
+    }
 }
 
 #[cube]

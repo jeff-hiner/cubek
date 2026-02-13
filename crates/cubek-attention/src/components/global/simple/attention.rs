@@ -8,7 +8,7 @@ use cubek_matmul::components::stage::StridedStageMemory;
 use std::marker::PhantomData;
 
 use crate::components::global::AttentionGlobalLayout;
-use crate::components::global::simple::QueryReader;
+use crate::components::global::simple::{CombinedScaleReader, QueryReader};
 use crate::components::global::simple::{AttentionWriter, AttentionWriterExpand, MaskReader};
 use crate::components::global::{GlobalAttention, simple::config::SimpleGlobalAttentionConfig};
 use crate::components::stage::{
@@ -46,6 +46,7 @@ impl<
         mut key_reader: Self::KeyReader,
         mut value_reader: Self::ValueReader,
         mut mask_reader: Self::MaskReader,
+        mut scale_reader: CombinedScaleReader,
         mut writer: Self::Writer,
         seq_q: u32,
         seq_kv: u32,
@@ -79,6 +80,9 @@ impl<
 
             sync_cube();
 
+            // Read combined scale for this K block (q_scale * k_scale)
+            let combined_scale = scale_reader.read_combined();
+
             // Core of flash attention
             SA::execute(
                 &query_registers,
@@ -90,6 +94,7 @@ impl<
                 &mut softmax_registers,
                 &mut accumulator_registers,
                 &mut stage_state,
+                combined_scale,
                 config.stage_config,
             );
 
@@ -99,6 +104,7 @@ impl<
             key_reader.advance_view();
             value_reader.advance_view();
             mask_reader.advance_view();
+            scale_reader.advance_k();
         }
 
         // Accumulators must be rescaled using running state

@@ -55,6 +55,13 @@ pub trait FragmentSoftmax<E: Float>: CubeType {
 
     /// Zeroes out the fragment
     fn zero(&mut self);
+
+    /// Set the combined quantization scale for INT8 CMMA attention.
+    /// This scale (q_scale * k_scale) is applied after CMMA to dequantize i32 results.
+    /// For non-INT8 attention implementations, this is a no-op.
+    fn set_combined_scale(&mut self, _scale: f32) {
+        // Default no-op for non-INT8 implementations
+    }
 }
 
 #[cube]

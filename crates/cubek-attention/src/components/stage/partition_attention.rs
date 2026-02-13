@@ -82,6 +82,7 @@ impl<
         softmax_partition: &mut SoftmaxPartition<AP, TA>,
         accumulator_partition: &mut AccumulatorPartition<AP, TA>,
         state: &mut Sequence<RunningState<SM<AP>>>,
+        combined_scale: f32,
         #[comptime] config: Self::Config,
     ) {
         let p = config.shared().partition_size;
@@ -99,6 +100,9 @@ impl<
                 // Get the q-th softmax tile and zero it
                 let softmax_tile = softmax_partition.get_at_mut(q);
                 softmax_tile.zero();
+
+                // Set combined quantization scale for INT8 CMMA (no-op for non-INT8)
+                softmax_tile.set_combined_scale(combined_scale);
 
                 // Get the only mask tile and fill it with q,kv-th data
                 let mask_tile = mask_partition.get_mut();

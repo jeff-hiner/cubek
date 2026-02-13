@@ -33,7 +33,7 @@ impl<AP: AttentionPrecision> QueryReader<AP> {
         tile: Coords2d,
         #[comptime] attention_tile_size: AttentionTileSize,
         #[comptime] partition_seq_q: u32,
-        #[comptime] partition_head_dim: u32,
+        #[comptime] _partition_head_dim: u32,
     ) -> StridedTile<QG<AP>> {
         let (row_in_partition, col) = tile;
 
@@ -43,18 +43,29 @@ impl<AP: AttentionPrecision> QueryReader<AP> {
 
         let tile_head_dim = attention_tile_size.head_dim;
 
+        // Get the View's actual column count for stride calculation.
+        let full_head_dim = self.query.shape().1;
+        let stride = full_head_dim / line_size;
+
+        // CRITICAL FIX: Slice the full row width, not just tile_head_dim.
+        // The to_linear_slice() returns a slice sized for CONTIGUOUS data.
+        // With strided memory layout, we need a larger slice that spans:
+        // from row 0 to row (seq_q-1), with full_head_dim stride between rows.
+        // Slicing to (seq_q, tile_head_dim) creates a slice of size seq_q * tile_head_dim,
+        // but strided access needs (seq_q-1) * full_head_dim + tile_head_dim elements.
+        let tile_row_start = row * attention_tile_size.seq_q;
         let slice = self
             .query
             .slice(
-                (row * attention_tile_size.seq_q, col * tile_head_dim),
-                (attention_tile_size.seq_q, tile_head_dim).runtime(),
+                (tile_row_start, 0u32),
+                (attention_tile_size.seq_q.runtime(), full_head_dim),
             )
             .to_linear_slice();
 
-        let start = 0;
-        let length = attention_tile_size.seq_q * tile_head_dim / line_size;
-        let end = start + length;
-        let stride = partition_head_dim * tile_head_dim / line_size;
+        // Start at the column offset for this tile
+        let start = col * tile_head_dim / line_size;
+        // End covers the last row's tile data
+        let end = (attention_tile_size.seq_q - 1) * stride + (col + 1) * tile_head_dim / line_size;
 
         StridedTile::<QG<AP>>::new_strided(
             slice,

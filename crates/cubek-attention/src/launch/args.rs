@@ -1,3 +1,4 @@
+use crate::components::global::simple::{CombinedScaleReader, ScaleReader};
 use crate::definition::{AttentionBlueprint, AttentionLineSizes, AttentionProblem};
 use cubecl::{
     prelude::*,
@@ -261,6 +262,29 @@ pub trait AttentionArgs: Send + Sync + 'static + Clone {
     fn line_size_out<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
         state: &Self::State<Q, K, V, M, O>,
     ) -> comptime_type!(LineSize);
+
+    /// Create a combined scale reader for this attention kernel.
+    ///
+    /// For INT8 CMMA with per-block quantization, this creates ScaleReaders that
+    /// can access the appropriate scale values. For non-INT8 attention, returns
+    /// a uniform scale reader with scale = 1.0.
+    ///
+    /// # Arguments
+    /// * `state` - The attention state
+    /// * `batch_head_idx` - Flattened batch*head index (CUBE_POS_Y)
+    /// * `q_block_idx` - Q block index (CUBE_POS_X), used for Q scale initial block
+    /// * `num_q_blocks_per_head` - Number of Q blocks per head
+    /// * `num_k_blocks_per_head` - Number of K blocks per head
+    fn create_scale_reader<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        _state: &Self::State<Q, K, V, M, O>,
+        _batch_head_idx: u32,
+        _q_block_idx: u32,
+        _num_q_blocks_per_head: u32,
+        _num_k_blocks_per_head: u32,
+    ) -> CombinedScaleReader {
+        // Default implementation for non-INT8 attention returns uniform 1.0
+        CombinedScaleReader::new_uniform()
+    }
 }
 
 /// Tensor input representation.
@@ -1412,6 +1436,17 @@ impl AttentionArgs for TensorArgs {
     ) -> comptime_type!(usize) {
         unsafe { (*state.output).line_size() }
     }
+
+    fn create_scale_reader<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        _state: &Self::State<Q, K, V, M, O>,
+        _batch_head_idx: u32,
+        _q_block_idx: u32,
+        _num_q_blocks_per_head: u32,
+        _num_k_blocks_per_head: u32,
+    ) -> CombinedScaleReader {
+        // Non-INT8 attention: no quantization scale needed
+        CombinedScaleReader::new_uniform()
+    }
 }
 
 mod __query {
@@ -1599,6 +1634,438 @@ mod __mask {
     impl<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float, GA: AttentionArgs> Copy
         for TensorMask<Q, K, V, M, O, GA>
     {
+    }
+}
+
+// ============================================================================
+// INT8 CMMA Pre-Quantized Tensor Args
+// ============================================================================
+// For INT8 CMMA attention with pre-quantized Q and K tensors.
+// Q and K are i8 tensors with separate f32 scale tensors (per-head scales).
+// V remains f16. Scales are indexed by [batch, heads].
+
+#[derive(Clone)]
+/// Type implementing [AttentionArgs] for INT8 CMMA with pre-quantized Q and K.
+///
+/// Q and K are passed as i8 tensors with per-head f32 scales.
+/// V remains f16.
+pub struct Int8TensorArgs;
+
+#[derive(CubeLaunch, CubeType)]
+/// Input representation for [Int8TensorArgs].
+///
+/// Q and K are pre-quantized tensors (typically i8) with per-block scale factors.
+/// Scale tensors have shape `[batch * heads * num_blocks]` flattened (one scale per block).
+/// Block size typically equals the attention tile size (e.g., 64).
+///
+/// The Q and K type parameters allow the type system to flow correctly through the
+/// attention kernel. At runtime for INT8 CMMA, Q=i8 and K=i8.
+pub struct Int8TensorInputs<Q: Numeric, K: Numeric, V: Numeric, M: Numeric> {
+    /// Pre-quantized query tensor, shape `[batch, heads, seq_q, head_dim]`.
+    pub query: Tensor<Line<Q>>,
+    /// Per-block scales for query, shape `[batch * heads * num_q_blocks]` flattened.
+    pub query_scale: Tensor<f32>,
+    /// Pre-quantized key tensor, shape `[batch, heads, seq_kv, head_dim]`.
+    pub key: Tensor<Line<K>>,
+    /// Per-block scales for key, shape `[batch * heads * num_k_blocks]` flattened.
+    pub key_scale: Tensor<f32>,
+    /// Value tensor in f16 (not quantized), shape `[batch, heads, seq_kv, val_dim]`.
+    pub value: Tensor<Line<V>>,
+    /// Optional mask tensor.
+    pub mask: CubeOption<Tensor<Line<M>>>,
+}
+
+#[derive(CubeType)]
+/// State for INT8 attention with pre-quantized inputs.
+///
+/// The Q and K type parameters allow the type system to flow correctly through the
+/// attention kernel. At runtime for INT8 CMMA, Q=i8 and K=i8.
+pub struct Int8AttentionState<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float> {
+    /// Pre-quantized query tensor.
+    pub query: *const Tensor<Line<Q>>,
+    /// Query scales (f32), shape `[batch * heads * num_q_blocks]` flattened.
+    pub query_scale: *const Tensor<f32>,
+    /// Pre-quantized key tensor.
+    pub key: *const Tensor<Line<K>>,
+    /// Key scales (f32), shape `[batch * heads * num_k_blocks]` flattened.
+    pub key_scale: *const Tensor<f32>,
+    /// Value tensor (f16).
+    pub value: *const Tensor<Line<V>>,
+    /// Optional mask.
+    pub mask: CubeOption<*const Tensor<Line<M>>>,
+    /// Output tensor.
+    pub output: *mut Tensor<Line<O>>,
+}
+
+#[cube]
+impl AttentionArgs for Int8TensorArgs {
+    // Q and K flow through as type parameters (i8 at runtime for INT8 CMMA)
+    type Input<Q: Numeric, K: Numeric, V: Numeric, M: Numeric> = Int8TensorInputs<Q, K, V, M>;
+    type Output<O: Float> = Tensor<Line<O>>;
+    type State<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float> =
+        Int8AttentionState<Q, K, V, M, O>;
+
+    fn init_state<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        input: &Self::Input<Q, K, V, M>,
+        output: &mut Self::Output<O>,
+    ) -> Self::State<Q, K, V, M, O> {
+        let mask = match &input.mask {
+            CubeOption::None => CubeOption::new_None(),
+            CubeOption::Some(mask) => {
+                let ptr: *const Tensor<Line<M>> = mask;
+                CubeOption::new_Some(ptr)
+            }
+        };
+
+        Int8AttentionState::<Q, K, V, M, O> {
+            query: &input.query,
+            query_scale: &input.query_scale,
+            key: &input.key,
+            key_scale: &input.key_scale,
+            value: &input.value,
+            mask,
+            output,
+        }
+    }
+
+    fn has_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> CubeOption<()> {
+        match state.mask {
+            CubeOption::None => CubeOption::new_None(),
+            CubeOption::Some(_) => CubeOption::new_Some(()),
+        }
+    }
+
+    fn read_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        coordinate: usize,
+    ) -> Line<Q> {
+        unsafe { (*state.query)[coordinate] }
+    }
+
+    fn read_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        coordinate: usize,
+    ) -> Line<K> {
+        unsafe { (*state.key)[coordinate] }
+    }
+
+    fn read_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        coordinate: usize,
+    ) -> Line<V> {
+        unsafe { (*state.value)[coordinate] }
+    }
+
+    fn read_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        coordinate: usize,
+    ) -> Line<M> {
+        unsafe { (*state.mask.unwrap())[coordinate] }
+    }
+
+    fn read_window_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        start: usize,
+        end: usize,
+    ) -> Slice<Line<Q>> {
+        unsafe { (*state.query).slice(start, end) }
+    }
+
+    fn read_window_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        start: usize,
+        end: usize,
+    ) -> Slice<Line<K>> {
+        unsafe { (*state.key).slice(start, end) }
+    }
+
+    fn read_window_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        start: usize,
+        end: usize,
+    ) -> Slice<Line<V>> {
+        unsafe { (*state.value).slice(start, end) }
+    }
+
+    fn read_window_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        start: usize,
+        end: usize,
+    ) -> Slice<Line<M>> {
+        unsafe { (*state.mask.unwrap()).slice(start, end) }
+    }
+
+    fn as_tensor_map_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        _state: &Self::State<Q, K, V, M, O>,
+    ) -> CubeOption<TensorMap<Q, Tiled>> {
+        CubeOption::new_None()
+    }
+
+    fn as_tensor_map_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        _state: &Self::State<Q, K, V, M, O>,
+    ) -> CubeOption<TensorMap<K, Tiled>> {
+        CubeOption::new_None()
+    }
+
+    fn as_tensor_map_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        _state: &Self::State<Q, K, V, M, O>,
+    ) -> CubeOption<TensorMap<V, Tiled>> {
+        CubeOption::new_None()
+    }
+
+    fn as_tensor_map_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        _state: &Self::State<Q, K, V, M, O>,
+    ) -> CubeOption<TensorMap<M, Tiled>> {
+        CubeOption::new_None()
+    }
+
+    fn shape_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.query).shape(dim) }
+    }
+
+    fn shape_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.key).shape(dim) }
+    }
+
+    fn shape_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.value).shape(dim) }
+    }
+
+    fn shape_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.mask.unwrap()).shape(dim) }
+    }
+
+    fn shape_out<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.output).shape(dim) }
+    }
+
+    fn stride_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.query).stride(dim) }
+    }
+
+    fn stride_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.key).stride(dim) }
+    }
+
+    fn stride_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.value).stride(dim) }
+    }
+
+    fn stride_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.mask.unwrap()).stride(dim) }
+    }
+
+    fn stride_out<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        dim: usize,
+    ) -> usize {
+        unsafe { (*state.output).stride(dim) }
+    }
+
+    fn write_out<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &mut Self::State<Q, K, V, M, O>,
+        coordinate: usize,
+        val: Line<O>,
+    ) {
+        unsafe { (*state.output)[coordinate] = val }
+    }
+
+    fn rank_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.query).rank() }
+    }
+
+    fn rank_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.key).rank() }
+    }
+
+    fn rank_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.value).rank() }
+    }
+
+    fn rank_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.mask.unwrap()).rank() }
+    }
+
+    fn rank_out<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.output).rank() }
+    }
+
+    fn len_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.query).len() }
+    }
+
+    fn len_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.key).len() }
+    }
+
+    fn len_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.value).len() }
+    }
+
+    fn len_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.mask.unwrap()).len() }
+    }
+
+    fn len_out<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.output).len() }
+    }
+
+    fn buffer_len_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.query).buffer_len() }
+    }
+
+    fn buffer_len_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.key).buffer_len() }
+    }
+
+    fn buffer_len_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.value).buffer_len() }
+    }
+
+    fn buffer_len_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.mask.unwrap()).buffer_len() }
+    }
+
+    fn buffer_len_out<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> usize {
+        unsafe { (*state.output).buffer_len() }
+    }
+
+    fn line_size_query<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> comptime_type!(usize) {
+        unsafe { (*state.query).line_size() }
+    }
+
+    fn line_size_key<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> comptime_type!(usize) {
+        unsafe { (*state.key).line_size() }
+    }
+
+    fn line_size_value<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> comptime_type!(usize) {
+        unsafe { (*state.value).line_size() }
+    }
+
+    fn line_size_mask<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> comptime_type!(usize) {
+        unsafe { (*state.mask.unwrap()).line_size() }
+    }
+
+    fn line_size_out<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+    ) -> comptime_type!(usize) {
+        unsafe { (*state.output).line_size() }
+    }
+
+    fn create_scale_reader<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float>(
+        state: &Self::State<Q, K, V, M, O>,
+        batch_head_idx: u32,
+        q_block_idx: u32,
+        num_q_blocks_per_head: u32,
+        num_k_blocks_per_head: u32,
+    ) -> CombinedScaleReader {
+        // Create per-block scale readers for INT8 CMMA attention.
+        // Scale tensors are flattened: [batch * heads * num_blocks]
+        // Each batch*head needs a slice of num_blocks elements.
+        let q_scale_start = batch_head_idx * num_q_blocks_per_head;
+        let q_scale_end = q_scale_start + num_q_blocks_per_head;
+        let q_scales = unsafe {
+            (*state.query_scale).slice(q_scale_start as usize, q_scale_end as usize)
+        };
+        let q_scale_reader = ScaleReader::new_per_block(q_scales, q_block_idx);
+
+        let k_scale_start = batch_head_idx * num_k_blocks_per_head;
+        let k_scale_end = k_scale_start + num_k_blocks_per_head;
+        let k_scales = unsafe {
+            (*state.key_scale).slice(k_scale_start as usize, k_scale_end as usize)
+        };
+        let k_scale_reader = ScaleReader::new_per_block(k_scales, 0);  // K always starts at block 0
+
+        CombinedScaleReader::new(q_scale_reader, k_scale_reader)
+    }
+}
+
+/// Helper trait for accessing scale tensors from Int8AttentionState.
+#[cube]
+pub trait Int8ScaleAccess<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float> {
+    /// Read the query scale for a given head index (batch * num_heads + head).
+    fn read_query_scale(state: &Int8AttentionState<Q, K, V, M, O>, head_idx: usize) -> f32;
+    /// Read the key scale for a given head index (batch * num_heads + head).
+    fn read_key_scale(state: &Int8AttentionState<Q, K, V, M, O>, head_idx: usize) -> f32;
+}
+
+#[cube]
+impl<Q: Numeric, K: Numeric, V: Numeric, M: Numeric, O: Float> Int8ScaleAccess<Q, K, V, M, O>
+    for Int8TensorArgs
+{
+    fn read_query_scale(state: &Int8AttentionState<Q, K, V, M, O>, head_idx: usize) -> f32 {
+        unsafe { (*state.query_scale)[head_idx] }
+    }
+
+    fn read_key_scale(state: &Int8AttentionState<Q, K, V, M, O>, head_idx: usize) -> f32 {
+        unsafe { (*state.key_scale)[head_idx] }
     }
 }
 

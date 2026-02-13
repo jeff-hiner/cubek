@@ -3,6 +3,7 @@ use cubecl::prelude::*;
 use cubecl::std::{CubeOption, tensor::r#virtual::VirtualTensor};
 
 use crate::components::global::GlobalAttentionConfig;
+use crate::components::global::simple::CombinedScaleReader;
 use crate::definition::{
     AttentionBlueprint, AttentionElems, AttentionPrecision, AttentionSetupError, CubeCountInput,
     InputRuntimeArg, OutputRuntimeArg,
@@ -74,6 +75,7 @@ pub trait BatchAttention<AP: AttentionPrecision>: 'static + Send + Sync {
         mask: CubeOption<VirtualTensor<MSK<AP>>>,
         out: VirtualTensor<OG<AP>, ReadWrite>,
         cube_count_args: CubeCountInput,
+        scale_reader: CombinedScaleReader,
         #[comptime] config: Self::Config,
     );
 }

@@ -39,7 +39,6 @@ fn one_tile_simple() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
 
@@ -55,6 +54,7 @@ fn one_tile_simple() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
 
     let strategy = strategy(blueprint);
@@ -94,7 +94,6 @@ fn one_partition_several_planes() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
 
@@ -110,6 +109,7 @@ fn one_partition_several_planes() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
 
     let strategy = strategy(blueprint);
@@ -151,7 +151,6 @@ fn problem_smaller_than_one_tile_seq_q_seq_kv_val_dim() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -165,6 +164,7 @@ fn problem_smaller_than_one_tile_seq_q_seq_kv_val_dim() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -201,7 +201,6 @@ fn head_dim_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -215,6 +214,7 @@ fn head_dim_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -250,7 +250,6 @@ fn two_rows_in_array_tile() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -264,6 +263,7 @@ fn two_rows_in_array_tile() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -300,7 +300,6 @@ fn one_tile_seqq16() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -314,6 +313,7 @@ fn one_tile_seqq16() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -350,7 +350,6 @@ fn one_tile_seqq4() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -364,6 +363,7 @@ fn one_tile_seqq4() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -399,7 +399,6 @@ fn seqq2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -413,6 +412,7 @@ fn seqq2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -448,7 +448,6 @@ fn hd2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -462,6 +461,7 @@ fn hd2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -497,7 +497,6 @@ fn kv2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -511,6 +510,7 @@ fn kv2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -546,7 +546,6 @@ fn vd2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -560,6 +559,7 @@ fn vd2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -595,7 +595,6 @@ fn hd2_vd2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -609,6 +608,7 @@ fn hd2_vd2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -644,7 +644,6 @@ fn all2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -658,6 +657,7 @@ fn all2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -694,7 +694,6 @@ fn global_iterations_2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -708,6 +707,7 @@ fn global_iterations_2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -744,7 +744,6 @@ fn global_iterations_2_kv2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -758,6 +757,7 @@ fn global_iterations_2_kv2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -794,7 +794,6 @@ fn partition_kv1_global1_with_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -808,6 +807,7 @@ fn partition_kv1_global1_with_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -844,7 +844,6 @@ fn partition_seqq2_global2_kv2_global2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -858,6 +857,7 @@ fn partition_seqq2_global2_kv2_global2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -893,7 +893,6 @@ fn partition_many_planes() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -907,6 +906,7 @@ fn partition_many_planes() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -943,7 +943,6 @@ fn partition_kv1_global3_with_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -957,6 +956,7 @@ fn partition_kv1_global3_with_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -993,7 +993,6 @@ fn partition_oob_in_q() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1007,6 +1006,7 @@ fn partition_oob_in_q() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1042,7 +1042,6 @@ fn partition_kv2_with_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1056,6 +1055,7 @@ fn partition_kv2_with_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1091,7 +1091,6 @@ fn partition_kv2_causal() {
         options: AttentionOptions {
             causal: true,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1105,6 +1104,7 @@ fn partition_kv2_causal() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1140,7 +1140,6 @@ fn partition_kv2_masked() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1154,6 +1153,7 @@ fn partition_kv2_masked() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1189,7 +1189,6 @@ fn stage2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1203,6 +1202,7 @@ fn stage2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1238,7 +1238,6 @@ fn stage4() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1252,6 +1251,7 @@ fn stage4() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1289,7 +1289,6 @@ fn stage2_problem4() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1303,6 +1302,7 @@ fn stage2_problem4() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1338,7 +1338,6 @@ fn reuse_key_value() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1352,6 +1351,7 @@ fn reuse_key_value() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1387,7 +1387,6 @@ fn double_row_wise() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1401,6 +1400,7 @@ fn double_row_wise() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1436,7 +1436,6 @@ fn one_tile_masked() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1450,6 +1449,7 @@ fn one_tile_masked() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1485,7 +1485,6 @@ fn one_tile_causal() {
         options: AttentionOptions {
             causal: true,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1499,6 +1498,7 @@ fn one_tile_causal() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1534,7 +1534,6 @@ fn one_tile_masked_causal() {
         options: AttentionOptions {
             causal: true,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1548,6 +1547,7 @@ fn one_tile_masked_causal() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1584,7 +1584,6 @@ fn masked_oob() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1598,6 +1597,7 @@ fn masked_oob() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1634,7 +1634,6 @@ fn masked_larger() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1648,6 +1647,7 @@ fn masked_larger() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1683,7 +1683,6 @@ fn num_heads_2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1697,6 +1696,7 @@ fn num_heads_2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1732,7 +1732,6 @@ fn batch_2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1746,6 +1745,7 @@ fn batch_2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1781,7 +1781,6 @@ fn batch_2_seqq2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1795,6 +1794,7 @@ fn batch_2_seqq2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1830,7 +1830,6 @@ fn num_heads_2_batch_2() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1844,6 +1843,7 @@ fn num_heads_2_batch_2() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1879,7 +1879,6 @@ fn num_heads_2_masked() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1893,6 +1892,7 @@ fn num_heads_2_masked() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1933,7 +1933,6 @@ fn huge_problem() {
         options: AttentionOptions {
             causal: false,
             accumulator_precision: AccumulatorPrecision::default(),
-            int8_cmma: false,
         },
     };
     let launch_settings = DeviceSettings::new(&client, &problem);
@@ -1947,6 +1946,7 @@ fn huge_problem() {
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: problem.dims.head_dim as u32,
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)

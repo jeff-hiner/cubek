@@ -1,5 +1,7 @@
 use crate::{
-    components::batch::{BatchAttentionFamily, base::BatchAttention},
+    components::batch::{BatchAttentionConfig as _, BatchAttentionFamily, base::BatchAttention},
+    components::global::GlobalAttentionConfig as _,
+    components::stage::StageAttentionConfig as _,
     definition::{AttentionBlueprint, AttentionElems, CubeCountInput},
     launch::{AttentionArgs, TensorKey, TensorMask, TensorOutput, TensorQuery, TensorValue},
 };
@@ -74,6 +76,32 @@ pub(crate) fn attention<
     let out =
         VirtualTensor::<OG, ReadWrite>::new::<TensorOutput<QG, KG, VG, MSK, OG, Args>>(&mut out);
 
+    // Create scale reader for quantization scales.
+    // CUBE_POS_Y encodes the flattened batch*num_heads index.
+    // CUBE_POS_X encodes the Q block index.
+    // For non-INT8 attention, this creates a uniform 1.0 scale reader.
+    let batch_head_idx = CUBE_POS_Y;
+    let q_block_idx = CUBE_POS_X;
+
+    // Compute number of blocks per head for scale tensor indexing.
+    // Block size matches the stage partition sizes used in the attention loop.
+    let global_config = config.global_config();
+    let stage_config = global_config.stage_config();
+    let q_block_size = stage_config.elements_in_stage_seq_q();
+    let k_block_size = stage_config.elements_in_partition_seq_kv();
+    let seq_q = Args::shape_query::<QG, KG, VG, MSK, OG>(&state, 2) as u32;
+    let seq_kv = Args::shape_key::<QG, KG, VG, MSK, OG>(&state, 2) as u32;
+    let num_q_blocks_per_head = seq_q.div_ceil(q_block_size);
+    let num_k_blocks_per_head = seq_kv.div_ceil(k_block_size);
+
+    let scale_reader = Args::create_scale_reader::<QG, KG, VG, MSK, OG>(
+        &state,
+        batch_head_idx,
+        q_block_idx,
+        num_q_blocks_per_head,
+        num_k_blocks_per_head,
+    );
+
     BMMF::Attention::<(QG, QT, KG, KS, VG, VS, KT, VT, SACC, SM, ACC, MSK, OG, OS)>::execute(
         query,
         key,
@@ -81,6 +109,7 @@ pub(crate) fn attention<
         mask,
         out,
         cube_count_args,
+        scale_reader,
         config,
     );
 }

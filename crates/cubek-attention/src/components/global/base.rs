@@ -2,7 +2,7 @@ use cubecl;
 use cubecl::prelude::*;
 
 use crate::{
-    components::global::simple::AttentionWriter,
+    components::global::simple::{AttentionWriter, CombinedScaleReader},
     definition::{
         AttentionBlueprint, AttentionElems, AttentionPrecision, AttentionSetupError,
         attention_types::*,
@@ -50,6 +50,7 @@ pub trait GlobalAttention<AP: AttentionPrecision>: 'static + Send + Sync {
         key_reader: Self::KeyReader,
         value_reader: Self::ValueReader,
         mask_reader: Self::MaskReader,
+        scale_reader: CombinedScaleReader,
         writer: Self::Writer,
         seq_q: u32,
         seq_kv: u32,

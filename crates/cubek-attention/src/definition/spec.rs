@@ -435,11 +435,13 @@ impl AttentionElems {
         }
     }
 
-    /// Create element types for INT8 CMMA attention (SageAttention-style).
+    /// Create element types for INT8 CMMA attention (SageAttention-style) with pre-quantization.
     ///
-    /// - Q and K are loaded as f16, quantized to i8 tiles for Q·K^T
+    /// With pre-quantization:
+    /// - Q and K are PRE-QUANTIZED to i8 with per-row scales BEFORE this kernel
+    /// - Global tensors are i8 (not f16), so no on-the-fly quantization needed
     /// - CMMA computes i8 × i8 → i32 for Q·K^T
-    /// - Scores are converted to f32 for softmax
+    /// - Scores are converted to f32 for softmax (using combined q_scale * k_scale)
     /// - V stays f16, P×V uses f16 × f16 → f32 CMMA
     /// - Output matches input dtype (f16/bf16), converted from f32 accumulator
     pub fn for_int8_cmma(global_dtypes: &AttentionGlobalTypes) -> AttentionElems {
@@ -450,11 +452,11 @@ impl AttentionElems {
         let f32_type = AccumulatorPrecision::default_accumulator_type();
 
         Self {
-            // Q: loaded as f16, quantized to i8 for CMMA
-            query_global: global_dtypes.query,
+            // Q: PRE-QUANTIZED to i8, loaded directly as i8
+            query_global: i8_type,
             query_tile: i8_type,
-            // K: loaded as f16, quantized to i8 for CMMA
-            key_global: global_dtypes.key,
+            // K: PRE-QUANTIZED to i8, loaded directly as i8
+            key_global: i8_type,
             key_stage: i8_type,
             // V: loaded as f16, stays f16 for P×V CMMA
             value_global: global_dtypes.value,

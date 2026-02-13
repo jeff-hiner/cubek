@@ -86,6 +86,7 @@ pub trait StageAttention<AP: AttentionPrecision>: 'static + Send + Sync {
         score: &mut Self::SoftmaxRegisters,
         accumulator: &mut Self::AccumulatorRegisters,
         prev_state: &mut Sequence<RunningState<SM<AP>>>,
+        combined_scale: f32,
         #[comptime] config: Self::Config,
     );
 
