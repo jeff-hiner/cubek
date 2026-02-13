@@ -4,7 +4,7 @@ use cubecl;
 use cubecl::prelude::*;
 use cubek_matmul::components::tile::StridedTile;
 
-use crate::components::tile::accelerated::hybrid_fragment::HybridFragment;
+use crate::components::tile::accelerated::hybrid_fragment::{HybridFragment, SoftmaxHybridFragment};
 use crate::components::tile::accelerated::local_tile::LocalTile;
 use crate::components::tile::accelerated::local_tile::LocalTileLayout;
 use crate::components::tile::accelerated::setup::BlackboxAcceleratedAttentionMatmulConfig;
@@ -28,7 +28,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
     /// Value fragment for P×V CMMA. Uses VT (f16 for float precisions).
     type Value = cmma::Matrix<VT<AP>>;
     type Mask = LocalTile<SM<AP>>;
-    type Softmax = HybridFragment<SM<AP>>;
+    type Softmax = SoftmaxHybridFragment<SM<AP>, VT<AP>>;
     type SoftmaxRow = LocalTile<SM<AP>>;
     type Accumulator = HybridFragment<ACC<AP>>;
 
@@ -63,13 +63,10 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
         out: &mut Self::Accumulator,
         #[comptime] _config: Self::Config,
     ) {
-        // Cast f32 softmax → f16 for P×V matmul.
-        // SM<AP> is f32 for numerical precision during softmax computation,
-        // but hardware CMMA only supports f16×f16 inputs on most GPUs.
-        let lhs_f16 = cmma::cast::<SM<AP>, VT<AP>>(&lhs.fragment);
+        // fragment_vt is already VT-typed (cast happened during update_from_rowwise),
+        // so we can use it directly — no cmma::cast needed.
         let out = &out.fragment;
-        // f16×f16→f32 CMMA for P×V
-        cmma::execute::<VT<AP>, VT<AP>, ACC<AP>, ACC<AP>>(&lhs_f16, rhs, out, out);
+        cmma::execute::<VT<AP>, VT<AP>, ACC<AP>, ACC<AP>>(&lhs.fragment_vt, rhs, out, out);
     }
 
     fn allocate_query(#[comptime] config: Self::Config) -> Self::Query {
@@ -123,7 +120,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
 
     fn allocate_softmax(#[comptime] config: Self::Config) -> Self::Softmax {
         let size = config.attention_tile_size().to_score_matmul_tile_size();
-        HybridFragment::new(size, config)
+        SoftmaxHybridFragment::new(size, config)
     }
 
     fn allocate_accumulator(#[comptime] config: Self::Config) -> Self::Accumulator {

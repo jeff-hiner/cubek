@@ -90,6 +90,22 @@ impl<E: Numeric> LocalTile<E> {
             }
         }
     }
+
+    /// Store to a shared memory slice, casting each element from `E` to `V`.
+    ///
+    /// Fuses the precision conversion into the store step, avoiding a separate
+    /// SMEM read+cast roundtrip. Used to write f32 softmax results as f16 for P×V CMMA.
+    pub fn store_cast_to<V: Numeric>(&self, smem_slice: &mut SliceMut<V>) {
+        for r in 0..self.layout.unit_size.0 {
+            for c in 0..self.layout.unit_size.1 {
+                let (row, col) = self.layout.absolute_pos((r, c));
+                let index = row * self.layout.total_size.1 + col;
+
+                smem_slice[index as usize] =
+                    V::cast_from(self.array[(r * self.layout.unit_size.1 + c) as usize]);
+            }
+        }
+    }
 }
 
 #[cube]
