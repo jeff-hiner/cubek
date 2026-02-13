@@ -52,6 +52,14 @@ impl<E: Numeric> Exp2LocalTile<E> {
 }
 
 #[cube]
+impl<E: Float> Exp2LocalTile<E> {
+    /// Load from an i32 slice, casting and scaling inline.
+    pub fn load_from_i32_slice_scaled(&mut self, smem_slice: &Slice<i32>, scale: E) {
+        self.inner.load_from_i32_slice_scaled(smem_slice, scale);
+    }
+}
+
+#[cube]
 impl<E: Float> RowwiseFormat<E> for Exp2LocalTile<E> {
     type Layout = LocalTileLayout;
 

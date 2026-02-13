@@ -92,6 +92,25 @@ impl<E: Numeric> LocalTile<E> {
     }
 }
 
+#[cube]
+impl<E: Float> LocalTile<E> {
+    /// Load from an i32 shared memory slice, casting to `E` and applying a scale factor.
+    ///
+    /// Fuses the i32→f32 conversion and scale multiplication into the load step,
+    /// avoiding a separate SMEM write+read roundtrip.
+    pub fn load_from_i32_slice_scaled(&mut self, smem_slice: &Slice<i32>, scale: E) {
+        for r in 0..self.layout.unit_size.0 {
+            for c in 0..self.layout.unit_size.1 {
+                let (row, col) = self.layout.absolute_pos((r, c));
+                let index = row * self.layout.total_size.1 + col;
+
+                self.array[(r * self.layout.unit_size.1 + c) as usize] =
+                    E::cast_from(smem_slice[index as usize]) * scale;
+            }
+        }
+    }
+}
+
 #[derive(CubeType, Copy, Clone)]
 pub struct LocalTileLayout {
     #[cube(comptime)]

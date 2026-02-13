@@ -92,14 +92,11 @@ pub struct Int8CmmaSoftmax<E: Float> {
     smem_slice: SliceMut<E>,
     /// Shared memory slice for i32 accumulator storage.
     /// Needed because acc_i32 has K=head_dim layout, but fragment needs K=seq_kv.
-    /// We store i32 to SMEM, then convert element-wise to avoid CMMA layout mismatch.
+    /// We store i32 to SMEM, then load into local_tile with fused cast+scale.
     smem_i32_slice: SliceMut<i32>,
     /// Local tile for row-wise operations using exp2() for softmax.
     /// Uses Exp2LocalTile because log2(e) is baked into Q quantization.
     local_tile: Exp2LocalTile<E>,
-    /// Number of rows in the softmax tile (seq_q).
-    #[cube(comptime)]
-    seq_q: u32,
     /// Stride for SMEM layout (= seq_kv).
     #[cube(comptime)]
     stride: u32,
@@ -160,8 +157,8 @@ impl<E: Float> Int8CmmaSoftmax<E> {
 
         // i32 shared memory for acc_i32 storage.
         // We need separate i32 SMEM because acc_i32 has K=head_dim CMMA layout,
-        // but self.fragment needs K=seq_kv. Storing i32 to SMEM then converting
-        // element-wise to f32 avoids the CMMA fragment layout mismatch.
+        // but self.fragment needs K=seq_kv. Storing i32 to SMEM then loading into
+        // local_tile with fused cast+scale avoids the CMMA fragment layout mismatch.
         let mut shared_memory_i32 =
             SharedMemory::<i32>::new(config.shared.num_planes as usize * smem_slot_size as usize);
         let smem_i32_slice = shared_memory_i32.slice_mut(
@@ -176,7 +173,6 @@ impl<E: Float> Int8CmmaSoftmax<E> {
             smem_slice,
             smem_i32_slice,
             local_tile,
-            seq_q,
             stride: seq_kv,
         }
     }
@@ -201,8 +197,6 @@ impl<E: Float> FragmentSoftmax<E> for Int8CmmaSoftmax<E> {
     }
 
     fn rowwise_mut(&mut self) -> &mut Self::SoftmaxRowFormat {
-        // Store acc_i32 directly to i32 SMEM.
-        // This uses acc_i32's native K=head_dim CMMA layout correctly.
         cmma::store(
             &mut self.smem_i32_slice,
             &self.acc_i32,
@@ -212,28 +206,11 @@ impl<E: Float> FragmentSoftmax<E> for Int8CmmaSoftmax<E> {
 
         sync_cube();
 
-        // Convert i32 → f32 element-wise in SMEM and apply quantization scale.
-        // This avoids CMMA layout mismatch: acc_i32 (K=head_dim) vs fragment (K=seq_kv).
-        // Element-wise conversion has no CMMA layout dependencies.
-        let seq_q = comptime!(self.seq_q);
-        let stride = comptime!(self.stride);
-        let num_elements = seq_q * stride;
-        let elements_per_thread = num_elements.div_ceil(32);
+        // Fused load: read i32 SMEM → cast to f32 → scale, directly into local_tile registers.
+        // This eliminates the intermediate f32 SMEM write+read roundtrip and one barrier.
         let scale = E::cast_from(self.combined_scale);
-        for i in 0..elements_per_thread {
-            let idx = UNIT_POS_X + i * 32;
-            if idx < num_elements {
-                // Read i32 from i32 SMEM, convert to f32, apply scale, write to f32 SMEM
-                let i32_val = self.smem_i32_slice[idx as usize];
-                self.smem_slice[idx as usize] = E::cast_from(i32_val) * scale;
-            }
-        }
-
-        sync_cube();
-
-        self.local_tile.load_from_slice(&self.smem_slice.to_slice());
-
-        sync_cube();
+        self.local_tile
+            .load_from_i32_slice_scaled(&self.smem_i32_slice.to_slice(), scale);
 
         &mut self.local_tile
     }
