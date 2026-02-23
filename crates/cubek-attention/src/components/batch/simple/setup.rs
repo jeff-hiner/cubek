@@ -27,6 +27,28 @@ impl<GA: GlobalAttentionFamily> BatchAttentionFamily for SimpleBatchAttentionFam
     type Config = SimpleBatchConfig<GA::Config>;
     type Blueprint = AttentionBlueprint;
 
+    fn launch<'a, AA: AttentionArgs, R: cubecl::Runtime>(
+        client: &cubecl::prelude::ComputeClient<R>,
+        cube_dim: cubecl::CubeDim,
+        cube_count: cubecl::CubeCount,
+        input: InputRuntimeArg<'a, AA, R>,
+        output: OutputRuntimeArg<'a, AA, R>,
+        cube_count_input: CubeCountInputArgs<'a, R>,
+        dtypes: &AttentionElems,
+        blueprint: AttentionBlueprint,
+    ) -> Result<(), LaunchError> {
+        attention::launch::<AA, Self, R>(
+            client,
+            cube_count,
+            cube_dim,
+            input,
+            output,
+            cube_count_input,
+            blueprint,
+            dtypes.into(),
+        )
+    }
+
     unsafe fn launch_unchecked<'a, AA: AttentionArgs, R: cubecl::Runtime>(
         client: &cubecl::prelude::ComputeClient<R>,
         cube_dim: cubecl::CubeDim,

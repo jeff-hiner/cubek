@@ -21,7 +21,8 @@ pub trait Routine: Debug + Clone {
     type Strategy;
     type Blueprint;
 
-    fn prepare(
+    fn prepare<R: Runtime>(
+        client: &ComputeClient<R>,
         problem: &AttentionProblem,
         device_settings: &DeviceSettings,
         strategy: BlueprintStrategy<Self>,

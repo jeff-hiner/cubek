@@ -124,11 +124,11 @@ impl<
                 tile_config,
                 partition_size: blueprint.tiling_scheme.partition_size,
                 stage_size: blueprint.tiling_scheme.stage_size,
-                reuse_key_value: blueprint.reuse_key_value,
                 num_planes,
                 key_smem_config,
                 value_smem_config,
                 out_smem_config,
+                original_head_dim: blueprint.original_head_dim,
             },
         }))
     }

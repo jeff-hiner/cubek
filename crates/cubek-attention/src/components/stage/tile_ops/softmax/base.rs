@@ -18,7 +18,7 @@ use crate::definition::attention_types::SM;
 /// Applies softmax to a tile with masking and updates the running state.
 ///
 /// Scales by `1 / sqrt(head_dim)`, applies the mask, computes row-wise max and sum,
-/// exponentiates, and updates the softmax state.
+/// exponentiates using exp2, and updates the softmax state.
 ///
 /// Returns the exponential difference used for normalization.
 pub fn tile_softmax<AP: AttentionPrecision, TA: TileAttention<AP>, R: Reducer>(

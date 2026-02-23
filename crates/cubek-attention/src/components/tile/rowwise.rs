@@ -171,7 +171,7 @@ impl<E: Numeric> RowWise<E> {
 
 #[cube]
 impl<E: Float> RowWise<E> {
-    /// Computes e^(self.val - other.val) for every row, and outputs a new RowWise
+    /// Computes e^(self.val - other.val) for every row, and outputs a new RowWise.
     pub fn exp_diff(&self, other: &RowWise<E>) -> RowWise<E> {
         let mut vals = Sequence::new();
 
@@ -187,6 +187,28 @@ impl<E: Float> RowWise<E> {
         }
     }
 
+    /// Computes 2^(self.val - other.val) for every row, and outputs a new RowWise.
+    ///
+    /// This is used by INT8 CMMA attention where log2(e) is baked into Q quantization,
+    /// enabling the identity: exp(x) = exp2(x * log2(e)).
+    pub fn exp2_diff(&self, other: &RowWise<E>) -> RowWise<E> {
+        let mut vals = Sequence::new();
+
+        #[unroll]
+        for i in 0..self.num_rows {
+            let val = (self.index(i) - other.index(i)).exp2();
+            vals.push(RowVal::<E> { val });
+        }
+
+        RowWise::<E> {
+            num_rows: self.num_rows,
+            vals,
+        }
+    }
+}
+
+#[cube]
+impl<E: Float> RowWise<E> {
     /// Replaces each value `v` (v >= 0) in a row with `1/v`.
     ///
     /// If `v = 0`, the result is set to `0` instead of `1/0`.

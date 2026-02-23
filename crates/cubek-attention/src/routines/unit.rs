@@ -1,4 +1,5 @@
-use cubecl::CubeDim;
+use cubecl::client::ComputeClient;
+use cubecl::{CubeDim, Runtime};
 use cubek_matmul::components::CubeDimResource;
 use cubek_matmul::components::{global::PartitionedStageFamily, stage::StridedStageFamily};
 
@@ -36,7 +37,8 @@ impl Routine for UnitRoutine {
     type Strategy = ();
     type Blueprint = AttentionBlueprint;
 
-    fn prepare(
+    fn prepare<R: Runtime>(
+        _client: &ComputeClient<R>,
         problem: &AttentionProblem,
         device_settings: &DeviceSettings,
         strategy: BlueprintStrategy<Self>,
@@ -105,16 +107,22 @@ fn blueprint(
                 stage_size: AttentionStageSize { seq_q: plane_dim },
             };
 
+            // Use original_head_dim if provided (for padded tensors), otherwise use head_dim
+            let original_head_dim = problem
+                .dims
+                .original_head_dim
+                .unwrap_or(problem.dims.head_dim) as u32;
+
             let blueprint = AttentionBlueprint {
                 hypercube_blueprint: HypercubeBlueprint {},
                 tiling_scheme,
                 plane_dim,
-                reuse_key_value: false,
                 two_rows_in_array_tile: false,
                 line_sizes: launch_settings.line_sizes.clone(),
                 masked: problem.masked,
                 causal: problem.options.causal,
                 check_bounds: tiling_scheme.check_bounds(&problem.dims),
+                original_head_dim,
             };
 
             validate(problem, blueprint)

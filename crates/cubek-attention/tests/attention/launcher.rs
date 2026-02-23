@@ -86,6 +86,7 @@ pub fn test_launch(
             causal: problem.options.causal,
             accumulator_precision: problem.options.accumulator_precision,
         },
+        problem.dims.original_head_dim,
     )
     .into()
     {

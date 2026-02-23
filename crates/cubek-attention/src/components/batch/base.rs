@@ -20,7 +20,20 @@ pub trait BatchAttentionFamily: Send + Sync + 'static {
     type Config: BatchAttentionConfig;
     type Blueprint;
 
-    /// Entry point
+    /// Entry point (checked version with bounds validation)
+    #[allow(clippy::too_many_arguments)]
+    fn launch<'a, AA: AttentionArgs, R: Runtime>(
+        client: &ComputeClient<R>,
+        cube_dim: CubeDim,
+        cube_count: CubeCount,
+        input: InputRuntimeArg<'a, AA, R>,
+        output: OutputRuntimeArg<'a, AA, R>,
+        cube_count_input: CubeCountInputArgs<'a, R>,
+        dtypes: &AttentionElems,
+        attention_blueprint: Self::Blueprint,
+    ) -> Result<(), LaunchError>;
+
+    /// Entry point (unchecked version)
     ///
     /// # Safety
     ///

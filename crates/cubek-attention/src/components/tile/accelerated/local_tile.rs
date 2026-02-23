@@ -14,7 +14,7 @@ use crate::components::tile::{FragmentLayout, FragmentLayoutExpand};
 /// Assumes:
 /// - unit_size * plane_dim = total_size (not dim wise but in total count)
 pub struct LocalTile<E: Numeric> {
-    array: Array<E>,
+    pub(crate) array: Array<E>,
     pub layout: LocalTileLayout,
 }
 
@@ -87,6 +87,41 @@ impl<E: Numeric> LocalTile<E> {
                 let index = row * self.layout.total_size.1 + col;
 
                 smem_slice[index as usize] = self.array[(r * self.layout.unit_size.1 + c) as usize];
+            }
+        }
+    }
+
+    /// Store to a shared memory slice, casting each element from `E` to `V`.
+    ///
+    /// Fuses the precision conversion into the store step, avoiding a separate
+    /// SMEM read+cast roundtrip. Used to write f32 softmax results as f16 for P×V CMMA.
+    pub fn store_cast_to<V: Numeric>(&self, smem_slice: &mut SliceMut<V>) {
+        for r in 0..self.layout.unit_size.0 {
+            for c in 0..self.layout.unit_size.1 {
+                let (row, col) = self.layout.absolute_pos((r, c));
+                let index = row * self.layout.total_size.1 + col;
+
+                smem_slice[index as usize] =
+                    V::cast_from(self.array[(r * self.layout.unit_size.1 + c) as usize]);
+            }
+        }
+    }
+}
+
+#[cube]
+impl<E: Float> LocalTile<E> {
+    /// Load from an i32 shared memory slice, casting to `E` and applying a scale factor.
+    ///
+    /// Fuses the i32→f32 conversion and scale multiplication into the load step,
+    /// avoiding a separate SMEM write+read roundtrip.
+    pub fn load_from_i32_slice_scaled(&mut self, smem_slice: &Slice<i32>, scale: E) {
+        for r in 0..self.layout.unit_size.0 {
+            for c in 0..self.layout.unit_size.1 {
+                let (row, col) = self.layout.absolute_pos((r, c));
+                let index = row * self.layout.total_size.1 + col;
+
+                self.array[(r * self.layout.unit_size.1 + c) as usize] =
+                    E::cast_from(smem_slice[index as usize]) * scale;
             }
         }
     }

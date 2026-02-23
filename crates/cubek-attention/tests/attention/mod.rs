@@ -8,7 +8,7 @@ pub(crate) use utils::tiling_scheme_ops;
 
 mod unit {
     use cubek_attention::{
-        definition::{AttentionBlueprint, AttentionTileSize},
+        definition::{AttentionBlueprint, AttentionProblem, AttentionTileSize},
         launch::{BlueprintStrategy, Strategy},
     };
     fn strategy(blueprint: AttentionBlueprint) -> Strategy {
@@ -26,6 +26,11 @@ mod unit {
 
     fn minimal_seq_q_stage() -> u32 {
         32
+    }
+
+    /// Use the actual head_dim for softmax scaling.
+    fn original_head_dim_for_blueprint(problem: &AttentionProblem) -> u32 {
+        problem.dims.head_dim as u32
     }
 
     mod f16_ty {
@@ -55,7 +60,7 @@ mod unit {
 
 mod blackbox_accelerated {
     use cubek_attention::{
-        definition::{AttentionBlueprint, AttentionTileSize},
+        definition::{AttentionBlueprint, AttentionProblem, AttentionTileSize},
         launch::{BlueprintStrategy, Strategy},
     };
 
@@ -68,6 +73,7 @@ mod blackbox_accelerated {
         {
             use cubek_attention::definition::AttentionTileSize;
 
+            // Metal uses 8×8×8 CMMA
             AttentionTileSize {
                 seq_q: 8,
                 seq_kv: 8,
@@ -77,16 +83,22 @@ mod blackbox_accelerated {
         }
 
         #[cfg(not(target_os = "macos"))]
+        // Vulkan can generally use 8×16×16 for f16×f16→f32 CMMA
         AttentionTileSize {
             seq_q: 8,
-            seq_kv: 8,
-            head_dim: 8,
-            val_dim: 8,
+            seq_kv: 16,
+            head_dim: 16,
+            val_dim: 16,
         }
     }
 
     fn minimal_seq_q_stage() -> u32 {
         1
+    }
+
+    /// Use the actual head_dim for softmax scaling.
+    fn original_head_dim_for_blueprint(problem: &AttentionProblem) -> u32 {
+        problem.dims.head_dim as u32
     }
 
     mod f16_ty {

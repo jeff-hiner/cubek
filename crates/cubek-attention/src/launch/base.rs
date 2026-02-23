@@ -37,6 +37,7 @@ pub fn launch<R: Runtime>(
     out: TensorHandle<R>,
     attention_global_types: &AttentionGlobalTypes,
     attention_options: AttentionOptions,
+    original_head_dim: Option<usize>,
 ) -> Result<(), AttentionSetupError> {
     launch_ref(
         strategy,
@@ -48,6 +49,7 @@ pub fn launch<R: Runtime>(
         &out.as_ref(),
         attention_global_types,
         attention_options,
+        original_head_dim,
     )
 }
 
@@ -62,6 +64,7 @@ pub fn launch_ref<R: Runtime>(
     out: &TensorHandleRef<R>,
     attention_global_types: &AttentionGlobalTypes,
     attention_options: AttentionOptions,
+    original_head_dim: Option<usize>,
 ) -> Result<(), AttentionSetupError> {
     match strategy {
         Strategy::BlackboxAccelerated(strategy) => {
@@ -75,6 +78,7 @@ pub fn launch_ref<R: Runtime>(
                 attention_global_types,
                 strategy,
                 attention_options,
+                original_head_dim,
             )
         }
         Strategy::Unit(strategy) => launch_attention::<R, UnitRoutine>(
@@ -87,6 +91,7 @@ pub fn launch_ref<R: Runtime>(
             attention_global_types,
             strategy,
             attention_options,
+            original_head_dim,
         ),
     }
 }
@@ -102,6 +107,7 @@ pub fn launch_attention<R: Runtime, A: Routine>(
     global_dtypes: &AttentionGlobalTypes,
     strategy: BlueprintStrategy<A>,
     attention_options: AttentionOptions,
+    original_head_dim: Option<usize>,
 ) -> Result<(), AttentionSetupError> {
     let definition = AttentionProblem {
         dims: AttentionDims {
@@ -111,6 +117,7 @@ pub fn launch_attention<R: Runtime, A: Routine>(
             head_dim: query.shape[3],
             seq_kv: key.shape[2],
             val_dim: value.shape[3],
+            original_head_dim,
         },
         masked: mask.is_some(),
         global_dtypes: global_dtypes.clone(),
@@ -118,10 +125,11 @@ pub fn launch_attention<R: Runtime, A: Routine>(
     };
 
     let device_settings = DeviceSettings::new(client, &definition);
-    let launch_info = A::prepare(&definition, &device_settings, strategy)?;
 
-    let result = unsafe {
-        <A as Routine>::BatchAttention::launch_unchecked::<TensorArgs, R>(
+    let launch_info = A::prepare(client, &definition, &device_settings, strategy)?;
+
+    let result = {
+        <A as Routine>::BatchAttention::launch::<TensorArgs, R>(
             client,
             launch_info.cube_dim,
             launch_info.cube_count_plan.resolve(),

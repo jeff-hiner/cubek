@@ -9,7 +9,6 @@ pub struct AttentionBlueprint {
     pub tiling_scheme: AttentionTilingScheme,
     pub plane_dim: u32,
 
-    pub reuse_key_value: bool,
     pub two_rows_in_array_tile: bool,
 
     pub line_sizes: AttentionLineSizes,
@@ -18,6 +17,10 @@ pub struct AttentionBlueprint {
     pub causal: bool,
 
     pub check_bounds: AttentionCheckBounds,
+
+    /// Original head_dim before padding. Used for softmax scale (1/sqrt(head_dim)).
+    /// When head_dim is padded for CMMA alignment, this preserves the original value.
+    pub original_head_dim: u32,
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]

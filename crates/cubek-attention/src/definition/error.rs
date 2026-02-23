@@ -1,3 +1,4 @@
+use cubecl::ir::StorageType;
 use cubecl::{CubeCount, CubeDim, LineSizeError, server::LaunchError};
 use std::fmt::{Debug, Display};
 
@@ -23,6 +24,16 @@ pub enum AttentionAvailabilityError {
 
     /// The requested cube dimensions are too large for the current runtime or hardware.
     CubeDimTooBig(CubeDim),
+
+    /// No supported CMMA configuration found for the given element types.
+    CmmaInstructionUnavailable {
+        /// A operand type (e.g., f16, i8)
+        a_type: StorageType,
+        /// B operand type (e.g., f16, i8)
+        b_type: StorageType,
+        /// C/D accumulator type (e.g., f32, i32)
+        cd_type: StorageType,
+    },
 }
 
 impl From<AttentionAvailabilityError> for AttentionSetupError {
@@ -86,6 +97,16 @@ impl Debug for AttentionAvailabilityError {
             }
             AttentionAvailabilityError::CubeDimTooBig(dim) => {
                 writeln!(f, "Cube dim too big {dim:?}")
+            }
+            AttentionAvailabilityError::CmmaInstructionUnavailable {
+                a_type,
+                b_type,
+                cd_type,
+            } => {
+                writeln!(
+                    f,
+                    "No supported CMMA configuration for a={a_type:?}, b={b_type:?}, cd={cd_type:?}"
+                )
             }
         }
     }

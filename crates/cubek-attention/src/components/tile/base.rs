@@ -1,16 +1,16 @@
-use cubecl;
-use cubecl::prelude::*;
-use cubek_matmul::components::CubeDimResource;
-use cubek_matmul::components::tile::StridedTile;
+//! Base trait definitions for tile-level attention computation.
 
 use crate::components::tile::{
     FragmentAccumulator, FragmentLayout, FragmentMask, FragmentSoftmax, RowwiseFormat,
 };
-use crate::definition::attention_types::{ACC, SM};
+use crate::definition::attention_types::{ACC, KS, SM};
 use crate::definition::{
     AttentionBlueprint, AttentionPrecision, AttentionSetupError, AttentionTileSize,
     InvalidConfigError,
 };
+
+use cubecl::{self, prelude::*};
+use cubek_matmul::components::{CubeDimResource, tile::StridedTile};
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -28,7 +28,10 @@ pub(crate) const FULLY_MASKED_ROW_THRESHOLD: f32 = 1e-4;
 pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
     type Config: TileAttentionConfig;
     type Query: CubeType;
-    type KeyValue: CubeType;
+    /// Key fragment type for Q·K^T.
+    type Key: CubeType;
+    /// Value fragment type for P×V.
+    type Value: CubeType;
     type Mask: FragmentMask<Layout = Self::FragmentLayout>;
 
     type Softmax: FragmentSoftmax<SM<AP>, Layout = Self::FragmentLayout, SoftmaxRowFormat = Self::SoftmaxRow>;
@@ -39,16 +42,19 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
 
     fn softmax_layout(#[comptime] config: Self::Config) -> Self::FragmentLayout;
 
+    /// Compute Q·K^T score matrix.
     fn score_matmul(
         lhs: &Self::Query,
-        rhs: &Self::KeyValue,
+        rhs: &Self::Key,
+        key_tile: &StridedTile<KS<AP>>,
         out: &mut Self::Softmax,
         #[comptime] config: Self::Config,
     );
 
+    /// Compute P×V (softmax × Value) accumulation.
     fn value_matmul(
         lhs: &Self::Softmax,
-        rhs: &Self::KeyValue,
+        rhs: &Self::Value,
         out: &mut Self::Accumulator,
         #[comptime] config: Self::Config,
     );
@@ -56,23 +62,22 @@ pub trait TileAttention<AP: AttentionPrecision>: Send + Sync + 'static {
     fn allocate_query(#[comptime] config: Self::Config) -> Self::Query;
     fn allocate_mask(#[comptime] config: Self::Config) -> Self::Mask;
 
-    fn allocate_key(#[comptime] config: Self::Config) -> Self::KeyValue;
-    fn allocate_value(#[comptime] config: Self::Config) -> Self::KeyValue;
-    fn allocate_key_value(#[comptime] config: Self::Config) -> Self::KeyValue;
+    fn allocate_key(#[comptime] config: Self::Config) -> Self::Key;
+    fn allocate_value(#[comptime] config: Self::Config) -> Self::Value;
 
     fn allocate_softmax(#[comptime] config: Self::Config) -> Self::Softmax;
     fn allocate_accumulator(#[comptime] config: Self::Config) -> Self::Accumulator;
 
     fn load_query<E: Numeric>(tile: &StridedTile<E>, fragment: &mut Self::Query);
 
-    fn load_key_transposed<E: Float>(
+    fn load_key_transposed<E: Numeric>(
         tile: &StridedTile<E>,
-        fragment: &mut Self::KeyValue,
+        fragment: &mut Self::Key,
         #[comptime] config: Self::Config,
     );
-    fn load_value<E: Float>(
+    fn load_value<E: Numeric>(
         tile: &StridedTile<E>,
-        fragment: &mut Self::KeyValue,
+        fragment: &mut Self::Value,
         #[comptime] config: Self::Config,
     );
     fn load_mask<E: Numeric>(
