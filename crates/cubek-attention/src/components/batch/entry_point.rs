@@ -27,7 +27,8 @@ pub(crate) fn attention<
     KS: Float,
     VG: Float,
     VS: Float,
-    KVT: Float,
+    KT: Float,
+    VT: Float,
     SM: Float,
     ACC: Float,
     MSK: Numeric,
@@ -39,7 +40,7 @@ pub(crate) fn attention<
     output: &mut Output<Args, OG>,
     cube_count_args: CubeCountInput,
     #[comptime] blueprint: AttentionBlueprint,
-    #[define(QG, QT, KG, KS, VG, VS, KVT, SM, ACC, MSK, OG, OS)] elem_types: [StorageType; 12],
+    #[define(QG, QT, KG, KS, VG, VS, KT, VT, SM, ACC, MSK, OG, OS)] elem_types: [StorageType; 13],
 ) {
     let config = comptime!(BMMF::expand_config(
         blueprint,
@@ -76,7 +77,7 @@ pub(crate) fn attention<
     let out =
         VirtualTensor::<OG, ReadWrite>::new::<TensorOutput<QG, KG, VG, MSK, OG, Args>>(&mut out);
 
-    BMMF::Attention::<(QG, QT, KG, KS, VG, VS, KVT, SM, ACC, MSK, OG, OS)>::execute(
+    BMMF::Attention::<(QG, QT, KG, KS, VG, VS, KT, VT, SM, ACC, MSK, OG, OS)>::execute(
         query,
         key,
         value,

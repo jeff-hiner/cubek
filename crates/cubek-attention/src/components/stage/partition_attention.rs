@@ -122,6 +122,7 @@ impl<
                     TA::score_matmul(
                         &query_tile.fragment,
                         key_tile.key(),
+                        &key_data,
                         softmax_tile,
                         config.tile_config(),
                     );

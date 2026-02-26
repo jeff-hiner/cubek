@@ -3,8 +3,7 @@
 
 /// Components for matrix multiplication
 pub mod components;
+pub mod definition;
 pub mod launch;
 /// Contains attention kernels
 pub mod routines;
-
-pub mod definition;

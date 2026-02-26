@@ -76,7 +76,6 @@ impl TileAttentionFamily for BlackboxAcceleratedTileAttention {
                     InnerLayout::Contiguous
                 },
             },
-            blueprint.reuse_key_value,
             blueprint.line_sizes.mask,
         )
     }
@@ -84,7 +83,6 @@ impl TileAttentionFamily for BlackboxAcceleratedTileAttention {
 
 fn validate(
     config: BlackboxAcceleratedAttentionMatmulConfig,
-    reuse_key_value: bool,
     line_sizes_mask: LineSize,
 ) -> Result<BlackboxAcceleratedAttentionMatmulConfig, AttentionSetupError> {
     if line_sizes_mask > 1 {
@@ -121,12 +119,6 @@ fn validate(
     if config.shared.attention_tile_size.head_dim < config.shared.attention_tile_size.val_dim {
         return Err(AttentionSetupError::InvalidConfig(Box::new(
             "Can't have tile head_dim < tile val dim (not sure why)",
-        )));
-    }
-
-    if reuse_key_value {
-        return Err(AttentionSetupError::InvalidConfig(Box::new(
-            "Can't reuse key/value because the fragment is col major for key and row major for value",
         )));
     }
 

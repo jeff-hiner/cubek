@@ -109,7 +109,6 @@ fn blueprint(
                 hypercube_blueprint: HypercubeBlueprint {},
                 tiling_scheme,
                 plane_dim,
-                reuse_key_value: false,
                 two_rows_in_array_tile: false,
                 line_sizes: launch_settings.line_sizes.clone(),
                 masked: problem.masked,
