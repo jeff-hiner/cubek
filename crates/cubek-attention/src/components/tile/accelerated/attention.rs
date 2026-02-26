@@ -4,7 +4,7 @@ use cubecl;
 use cubecl::prelude::*;
 use cubek_matmul::components::tile::StridedTile;
 
-use crate::components::tile::accelerated::hybrid_fragment::HybridFragment;
+use crate::components::tile::accelerated::hybrid_fragment::{HybridFragment, SoftmaxHybridFragment};
 use crate::components::tile::accelerated::local_tile::LocalTile;
 use crate::components::tile::accelerated::local_tile::LocalTileLayout;
 use crate::components::tile::accelerated::setup::BlackboxAcceleratedAttentionMatmulConfig;
@@ -23,12 +23,12 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
     type Config = BlackboxAcceleratedAttentionMatmulConfig;
 
     type Query = cmma::Matrix<QT<AP>>;
-    /// Key fragment for Q·K^T CMMA. Uses KT type.
-    type Key = cmma::Matrix<KT<AP>>;
-    /// Value fragment for P×V CMMA. Uses VT type.
+    /// Key fragment for Q·K^T CMMA. Uses VT (f16 for float precisions).
+    type Key = cmma::Matrix<VT<AP>>;
+    /// Value fragment for P×V CMMA. Uses VT (f16 for float precisions).
     type Value = cmma::Matrix<VT<AP>>;
     type Mask = LocalTile<SM<AP>>;
-    type Softmax = HybridFragment<SM<AP>>;
+    type Softmax = SoftmaxHybridFragment<SM<AP>, VT<AP>>;
     type SoftmaxRow = LocalTile<SM<AP>>;
     type Accumulator = HybridFragment<ACC<AP>>;
 
@@ -54,7 +54,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
     ) {
         // Float path: f16×f16→f32 CMMA for Q·K^T
         let out = &out.fragment;
-        cmma::execute::<QT<AP>, KT<AP>, SM<AP>, SM<AP>>(lhs, rhs, out, out);
+        cmma::execute::<QT<AP>, VT<AP>, SM<AP>, SM<AP>>(lhs, rhs, out, out);
     }
 
     fn value_matmul(
@@ -63,9 +63,10 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
         out: &mut Self::Accumulator,
         #[comptime] _config: Self::Config,
     ) {
-        let lhs = &lhs.fragment;
+        // fragment_vt is already VT-typed (cast happened during update_from_rowwise),
+        // so we can use it directly — no cmma::cast needed.
         let out = &out.fragment;
-        cmma::execute::<SM<AP>, VT<AP>, ACC<AP>, ACC<AP>>(lhs, rhs, out, out);
+        cmma::execute::<VT<AP>, VT<AP>, ACC<AP>, ACC<AP>>(&lhs.fragment_vt, rhs, out, out);
     }
 
     fn allocate_query(#[comptime] config: Self::Config) -> Self::Query {
@@ -85,7 +86,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
     fn allocate_key(#[comptime] config: Self::Config) -> Self::Key {
         let size = config.attention_tile_size();
         unsafe {
-            cmma::Matrix::<KT<AP>>::uninitialized(
+            cmma::Matrix::<VT<AP>>::uninitialized(
                 cmma::MatrixIdent::B,
                 size.seq_q as usize,
                 size.seq_kv as usize,
@@ -119,7 +120,7 @@ impl<AP: AttentionPrecision> TileAttention<AP> for BlackboxAcceleratedTileAttent
 
     fn allocate_softmax(#[comptime] config: Self::Config) -> Self::Softmax {
         let size = config.attention_tile_size().to_score_matmul_tile_size();
-        HybridFragment::new(size, config)
+        SoftmaxHybridFragment::new(size, config)
     }
 
     fn allocate_accumulator(#[comptime] config: Self::Config) -> Self::Accumulator {
