@@ -127,8 +127,8 @@ pub fn launch_attention<R: Runtime, A: Routine>(
     let device_settings = DeviceSettings::new(client, &definition);
     let launch_info = A::prepare(&definition, &device_settings, strategy)?;
 
-    let result = unsafe {
-        <A as Routine>::BatchAttention::launch_unchecked::<TensorArgs, R>(
+    let result = {
+        <A as Routine>::BatchAttention::launch::<TensorArgs, R>(
             client,
             launch_info.cube_dim,
             launch_info.cube_count_plan.resolve(),
