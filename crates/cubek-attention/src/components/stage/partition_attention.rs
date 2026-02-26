@@ -141,13 +141,14 @@ impl<
                 // Perform the softmax calculation on the (row-format) softmax tile, including masking
                 // This mutates the (row-format) softmax tile and the state
                 // Also outputs a value needed to scale accumulator later
+                // Use original_head_dim for correct scaling when head_dim is padded for CMMA alignment
                 let scale = tile_softmax::<AP, TA, P::Reducer>(
                     softmax_rowwise,
                     mask_partition.get(),
                     state_q,
                     &mut max_placeholder,
                     &mut sum_placeholder,
-                    p.head_dim * config.tile_config().attention_tile_size().head_dim,
+                    config.shared().original_head_dim,
                     config.tile_config(),
                 );
 

@@ -99,6 +99,12 @@ fn blueprint(
                 stage_size: AttentionStageSize { seq_q: 1 },
             };
 
+            // Use original_head_dim if provided (for padded tensors), otherwise use head_dim
+            let original_head_dim = problem
+                .dims
+                .original_head_dim
+                .unwrap_or(problem.dims.head_dim) as u32;
+
             let blueprint = AttentionBlueprint {
                 hypercube_blueprint: HypercubeBlueprint {},
                 plane_dim: launch_settings.plane_dim,
@@ -108,6 +114,7 @@ fn blueprint(
                 causal: problem.options.causal,
                 tiling_scheme,
                 check_bounds: tiling_scheme.check_bounds(&problem.dims),
+                original_head_dim,
             };
 
             validate(problem, blueprint)

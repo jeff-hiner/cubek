@@ -156,6 +156,8 @@ pub struct SharedPartitionAttentionConfig<TC: TileAttentionConfig> {
     pub key_smem_config: StageMemoryConfig,
     pub value_smem_config: StageMemoryConfig,
     pub out_smem_config: StageMemoryConfig,
+    /// Original head_dim before padding, used for correct softmax scale (1/sqrt(original_head_dim)).
+    pub original_head_dim: u32,
 }
 
 impl<TC: TileAttentionConfig> PartitionAttentionConfig<TC> {
