@@ -236,6 +236,11 @@ impl<
                     config.tile_config(),
                 );
 
+                // Sync required: cmma::store is cooperative across units in the plane.
+                // Each unit writes only its portion. Without sync, plane_write may read
+                // from shared memory before all units have completed their stores.
+                sync_cube();
+
                 W::on_event(writer, WriteEvent::new_TileStored(tile_pos));
             }
         }

@@ -235,7 +235,7 @@ impl<TC: TileAttentionConfig> StageAttentionConfig for PartitionAttentionConfig<
     }
 
     fn elements_in_partition_seq_q(&self) -> u32 {
-        self.shared().partition_size.seq_q * self.elements_in_tile_seq_kv()
+        self.shared().partition_size.seq_q * self.elements_in_tile_seq_q()
     }
 
     fn elements_in_partition_seq_kv(&self) -> u32 {
