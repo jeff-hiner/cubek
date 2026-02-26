@@ -1,11 +1,12 @@
-use crate::attention::launcher::test_launch;
-use crate::attention::tiling_scheme_ops::*;
+use crate::attention::{launcher::test_launch, tiling_scheme_ops::*};
 use cubecl::{Runtime, TestRuntime};
-use cubek_attention::definition::{
-    AccumulatorPrecision, AttentionDims, AttentionOptions, AttentionPartitionSize,
-    AttentionProblem, AttentionStageSize, AttentionTilingScheme, HypercubeBlueprint,
+use cubek_attention::{
+    definition::{
+        AccumulatorPrecision, AttentionDims, AttentionOptions, AttentionPartitionSize,
+        AttentionProblem, AttentionStageSize, AttentionTilingScheme, HypercubeBlueprint,
+    },
+    routines::DeviceSettings,
 };
-use cubek_attention::routines::DeviceSettings;
 
 #[test]
 fn one_tile_simple() {
@@ -32,6 +33,7 @@ fn one_tile_simple() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -47,12 +49,12 @@ fn one_tile_simple() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
 
     let strategy = strategy(blueprint);
@@ -85,6 +87,7 @@ fn one_partition_several_planes() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -100,12 +103,12 @@ fn one_partition_several_planes() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
 
     let strategy = strategy(blueprint);
@@ -140,6 +143,7 @@ fn problem_smaller_than_one_tile_seq_q_seq_kv_val_dim() {
             seq_kv,
             head_dim,
             val_dim,
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -153,12 +157,12 @@ fn problem_smaller_than_one_tile_seq_q_seq_kv_val_dim() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -188,6 +192,7 @@ fn head_dim_oob() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim,
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -201,12 +206,12 @@ fn head_dim_oob() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -235,6 +240,7 @@ fn two_rows_in_array_tile() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -248,12 +254,12 @@ fn two_rows_in_array_tile() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: true,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -283,6 +289,7 @@ fn one_tile_seqq16() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -296,12 +303,12 @@ fn one_tile_seqq16() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -331,6 +338,7 @@ fn one_tile_seqq4() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -344,12 +352,12 @@ fn one_tile_seqq4() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -378,6 +386,7 @@ fn seqq2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -391,12 +400,12 @@ fn seqq2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -425,6 +434,7 @@ fn hd2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -438,12 +448,12 @@ fn hd2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -472,6 +482,7 @@ fn kv2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -485,12 +496,12 @@ fn kv2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -519,6 +530,7 @@ fn vd2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -532,12 +544,12 @@ fn vd2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -566,6 +578,7 @@ fn hd2_vd2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -579,12 +592,12 @@ fn hd2_vd2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -613,6 +626,7 @@ fn all2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -626,12 +640,12 @@ fn all2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -661,6 +675,7 @@ fn global_iterations_2() {
             seq_kv,
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -674,12 +689,12 @@ fn global_iterations_2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -709,6 +724,7 @@ fn global_iterations_2_kv2() {
             seq_kv,
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -722,12 +738,12 @@ fn global_iterations_2_kv2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -757,6 +773,7 @@ fn partition_kv1_global1_with_oob() {
             seq_kv,
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -770,12 +787,12 @@ fn partition_kv1_global1_with_oob() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -805,6 +822,7 @@ fn partition_seqq2_global2_kv2_global2() {
             seq_kv,
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -818,12 +836,12 @@ fn partition_seqq2_global2_kv2_global2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -852,6 +870,7 @@ fn partition_many_planes() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -865,12 +884,12 @@ fn partition_many_planes() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -900,6 +919,7 @@ fn partition_kv1_global3_with_oob() {
             seq_kv,
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -913,12 +933,12 @@ fn partition_kv1_global3_with_oob() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -948,6 +968,7 @@ fn partition_oob_in_q() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -961,12 +982,12 @@ fn partition_oob_in_q() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -995,6 +1016,7 @@ fn partition_kv2_with_oob() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1008,12 +1030,12 @@ fn partition_kv2_with_oob() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1042,6 +1064,7 @@ fn partition_kv2_causal() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1055,12 +1078,12 @@ fn partition_kv2_causal() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1089,6 +1112,7 @@ fn partition_kv2_masked() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: true,
         global_dtypes: global_dtypes(),
@@ -1102,12 +1126,12 @@ fn partition_kv2_masked() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1136,6 +1160,7 @@ fn stage2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1149,12 +1174,12 @@ fn stage2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1183,6 +1208,7 @@ fn stage4() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1196,12 +1222,12 @@ fn stage4() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1232,6 +1258,7 @@ fn stage2_problem4() {
             seq_kv,
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1245,12 +1272,12 @@ fn stage2_problem4() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1279,6 +1306,7 @@ fn reuse_key_value() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1292,12 +1320,12 @@ fn reuse_key_value() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: true,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1326,6 +1354,7 @@ fn double_row_wise() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1339,12 +1368,12 @@ fn double_row_wise() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: true,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1373,6 +1402,7 @@ fn one_tile_masked() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: true,
         global_dtypes: global_dtypes(),
@@ -1386,12 +1416,12 @@ fn one_tile_masked() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1420,6 +1450,7 @@ fn one_tile_causal() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1433,12 +1464,12 @@ fn one_tile_causal() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1467,6 +1498,7 @@ fn one_tile_masked_causal() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: true,
         global_dtypes: global_dtypes(),
@@ -1480,12 +1512,12 @@ fn one_tile_masked_causal() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1515,6 +1547,7 @@ fn masked_oob() {
             seq_kv,
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: true,
         global_dtypes: global_dtypes(),
@@ -1528,12 +1561,12 @@ fn masked_oob() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1563,6 +1596,7 @@ fn masked_larger() {
             seq_kv,
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: true,
         global_dtypes: global_dtypes(),
@@ -1576,12 +1610,12 @@ fn masked_larger() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1610,6 +1644,7 @@ fn num_heads_2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1623,12 +1658,12 @@ fn num_heads_2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1657,6 +1692,7 @@ fn batch_2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1670,12 +1706,12 @@ fn batch_2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1704,6 +1740,7 @@ fn batch_2_seqq2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1717,12 +1754,12 @@ fn batch_2_seqq2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1751,6 +1788,7 @@ fn num_heads_2_batch_2() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1764,12 +1802,12 @@ fn num_heads_2_batch_2() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1798,6 +1836,7 @@ fn num_heads_2_masked() {
             seq_kv: elements_in_partition_seq_kv(&tiling_scheme),
             head_dim: elements_in_partition_head_dim(&tiling_scheme),
             val_dim: elements_in_partition_val_dim(&tiling_scheme),
+            original_head_dim: None,
         },
         masked: true,
         global_dtypes: global_dtypes(),
@@ -1811,12 +1850,12 @@ fn num_heads_2_masked() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
@@ -1830,13 +1869,14 @@ fn huge_problem() {
     let head_dim = 64;
     let val_dim = 64;
     let hd = head_dim as u32 / tile_size().head_dim;
+    let vd = val_dim as u32 / tile_size().val_dim;
     let tiling_scheme = AttentionTilingScheme {
         tile_size: tile_size(),
         partition_size: AttentionPartitionSize {
             seq_q: 1,
             seq_kv: 1,
             head_dim: hd,
-            val_dim: hd,
+            val_dim: vd,
         },
         stage_size: AttentionStageSize {
             seq_q: minimal_seq_q_stage(),
@@ -1850,6 +1890,7 @@ fn huge_problem() {
             seq_kv,
             head_dim,
             val_dim,
+            original_head_dim: None,
         },
         masked: false,
         global_dtypes: global_dtypes(),
@@ -1863,12 +1904,12 @@ fn huge_problem() {
         hypercube_blueprint: HypercubeBlueprint {},
         tiling_scheme,
         plane_dim: launch_settings.plane_dim,
-        reuse_key_value: false,
         two_rows_in_array_tile: false,
         line_sizes: launch_settings.line_sizes,
         masked: problem.masked,
         causal: problem.options.causal,
         check_bounds: tiling_scheme.check_bounds(&problem.dims),
+        original_head_dim: original_head_dim_for_blueprint(&problem),
     };
     let strategy = strategy(blueprint);
     test_launch(client, problem, strategy)
